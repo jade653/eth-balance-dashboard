@@ -24,6 +24,7 @@ const STATE_PATH = process.env.NOTIFY_STATE || path.join(DIR, 'notify-state.json
 
 const mode = process.argv[2];
 const DRY = process.argv.includes('--dry-run');
+const VERBOSE = process.argv.includes('--verbose');   // SMTP 대화를 보여준다 (진단용)
 if (mode !== 'daily' && mode !== 'check') {
   console.error('사용법: node notify.js daily|check [--dry-run]');
   process.exit(2);
@@ -65,6 +66,14 @@ const MAIL_TO = need('MAIL_TO').split(',').map((s) => s.trim()).filter(Boolean);
 const APP_URL = (env.APP_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const PUBLIC_URL = (env.PUBLIC_URL || '').replace(/\/$/, '');
 const COOLDOWN_MIN = Number(env.ALERT_COOLDOWN_MIN || 60);
+
+// curl 은 SMTP URL 의 '경로'를 EHLO 인사말로 쓴다. 지정하지 않으면 업로드 파일명
+// (ethdash-mail-1234-....eml) 을 그대로 보내 스팸 점수에 불리하다.
+// 우리가 실제로 가진 도메인을 쓴다.
+const EHLO_NAME = env.EHLO_NAME
+  || (PUBLIC_URL ? new URL(PUBLIC_URL).hostname : '')
+  || os.hostname()
+  || 'localhost';
 
 // ── 상태 파일 ───────────────────────────────────────────────────────────────
 // 어제 잔액(전일 대비 변동 계산용)과 장애 알림 중복 방지 정보를 들고 있다.
@@ -172,6 +181,7 @@ function buildMessage(subject, html) {
     `To: ${MAIL_TO.join(', ')}`,
     `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
     `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${Date.now()}.${process.pid}@${EHLO_NAME}>`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
@@ -205,7 +215,7 @@ function send(subject, html) {
 
   // 비밀번호가 ps 에 노출되지 않도록 curl 설정을 stdin 으로 넘긴다
   const conf = [
-    `url = ${curlQuote(`smtp://${SMTP_HOST}:${SMTP_PORT}`)}`,
+    `url = ${curlQuote(`smtp://${SMTP_HOST}:${SMTP_PORT}/${EHLO_NAME}`)}`,
     'ssl-reqd',                                  // 587 STARTTLS 강제
     `user = ${curlQuote(`${SMTP_USER}:${SMTP_PASS}`)}`,
     `mail-from = ${curlQuote(MAIL_FROM)}`,
@@ -214,6 +224,7 @@ function send(subject, html) {
     'silent',
     'show-error',
     'max-time = 30',
+    ...(VERBOSE ? ['verbose'] : []),
   ].join('\n');
 
   return new Promise((resolve) => {
@@ -222,6 +233,13 @@ function send(subject, html) {
     c.stderr.on('data', (d) => { err += d; });
     c.on('close', (code) => {
       fs.unlinkSync(tmp);
+      if (VERBOSE) {
+        // 인증 구간에는 자격증명이 base64 로 들어 있으므로 걸러낸다
+        console.log(err.split('\n')
+          .filter((l) => /^[<>] /.test(l))
+          .filter((l) => !/AUTH/i.test(l) && !/^> [A-Za-z0-9+/]{20,}={0,2}$/.test(l))
+          .join('\n'));
+      }
       if (code === 0) console.log(`발송 완료: ${subject} -> ${MAIL_TO.join(', ')}`);
       else console.error(`발송 실패 (curl ${code}): ${err.trim()}`);
       resolve(code);
