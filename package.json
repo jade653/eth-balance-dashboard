@@ -1,0 +1,11 @@
+{
+  "name": "eth-balance-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Realtime ETH balance dashboard - zero dependency JSON-RPC polling + SSE",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=18" }
+}

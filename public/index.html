@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETH Balance Monitor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9830;</text></svg>">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>ETH Balance Monitor</h1>
+        <p class="brand-sub" id="rpc-meta">connecting…</p>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="status" id="status" data-state="starting">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span class="status-label" id="status-label">연결 중</span>
+      </div>
+      <div class="block-ticker" id="block-ticker" title="최신 블록 번호">
+        <span class="block-hash">#</span><span class="block-number" id="block-number">–</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="banner" id="error-banner" hidden></div>
+
+  <section class="kpis" aria-label="요약 지표">
+    <article class="kpi">
+      <p class="kpi-label">추적 중인 총 잔액</p>
+      <p class="kpi-value" id="kpi-total"><span class="skeleton w-lg"></span></p>
+      <p class="kpi-foot" id="kpi-total-delta">&nbsp;</p>
+    </article>
+    <article class="kpi">
+      <p class="kpi-label">주소 수</p>
+      <p class="kpi-value" id="kpi-count"><span class="skeleton w-sm"></span></p>
+      <p class="kpi-foot" id="kpi-changed">&nbsp;</p>
+    </article>
+    <article class="kpi">
+      <p class="kpi-label">블록 시각</p>
+      <p class="kpi-value" id="kpi-blocktime"><span class="skeleton w-md"></span></p>
+      <p class="kpi-foot" id="kpi-basefee">&nbsp;</p>
+    </article>
+    <article class="kpi">
+      <p class="kpi-label">마지막 갱신</p>
+      <p class="kpi-value" id="kpi-updated"><span class="skeleton w-md"></span></p>
+      <p class="kpi-foot" id="kpi-latency">&nbsp;</p>
+    </article>
+  </section>
+
+  <section class="panel" aria-label="주소별 잔액">
+    <div class="panel-head">
+      <h2>주소별 잔액</h2>
+      <div class="panel-tools">
+        <label class="sr-only" for="filter">주소 필터</label>
+        <input id="filter" type="search" placeholder="이름 · 주소 검색" autocomplete="off" spellcheck="false">
+        <div class="segmented" role="group" aria-label="정렬 기준">
+          <button type="button" data-sort="config" class="is-active">설정순</button>
+          <button type="button" data-sort="balance">잔액순</button>
+          <button type="button" data-sort="delta">변동순</button>
+          <button type="button" data-sort="label">이름순</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th class="col-name">계정</th>
+            <th class="col-spark">추이</th>
+            <th class="col-num">잔액 (ETH)</th>
+            <th class="col-num">변동</th>
+            <th class="col-meta">최근 변동 블록</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr class="empty"><td colspan="5">노드에서 첫 스냅샷을 받는 중…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>데이터: <code id="foot-rpc">–</code> · <code>eth_blockNumber</code> → <code>eth_getBalance</code> 폴링</span>
+    <span id="foot-poll"></span>
+  </footer>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

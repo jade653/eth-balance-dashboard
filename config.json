@@ -1,0 +1,17 @@
+{
+  "rpcUrl": "https://ethereum-rpc.publicnode.com",
+  "pollIntervalMs": 5000,
+  "historyLength": 60,
+  "addresses": [
+    { "label": "초기 팀",       "address": "0x6d93f35603783fb9c1ac061b1349bed7a31386c4", "tag": "EOA" },
+    { "label": "머스트리 재단",  "address": "0x299e421dec65933ed64e38ce16f536fe2271a2ac", "tag": "EOA" },
+    { "label": "협력사",        "address": "0xc5462ae75997214fe1f7490857ffd5b8e09580b5", "tag": "EOA" },
+    { "label": "스테이킹",      "address": "0x403ebbf2e97caff8567e36cba3f8d3ca27e37970", "tag": "EOA" },
+    { "label": "커뮤니티",      "address": "0x4e951d513959e42c6ea30a92927a6237e63304f5", "tag": "EOA" },
+
+    { "label": "Wrapped Ether (WETH)",    "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "tag": "Contract" },
+    { "label": "Beacon Deposit Contract", "address": "0x00000000219ab540356cBB839Cbe05303d7705Fa", "tag": "Contract" },
+    { "label": "Arbitrum One Bridge",     "address": "0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a", "tag": "Bridge" },
+    { "label": "Binance Hot Wallet 7",    "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8", "tag": "CEX" }
+  ]
+}

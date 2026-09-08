@@ -1,0 +1,17 @@
+# 배포 시 주입하는 비밀값 (RPC API 키 등). 절대 커밋하지 않는다.
+# deploy.sh 가 있으면 source 해서 설정을 덮어쓴다.
+deploy.env
+
+# 백업 / 임시 / 로그
+*.bak
+*.bak.*
+*.log
+*~
+.*.swp
+
+# 이 프로젝트는 의존성이 0개지만, 생기더라도 커밋하지 않는다
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
