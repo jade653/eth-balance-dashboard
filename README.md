@@ -6,7 +6,8 @@
 
 ## 실행
 
-`node:sqlite` 를 쓰므로 Node 22 이상이 필요하다(`package.json` engines). nvm 을 쓴다면
+`node:sqlite` 를 쓰므로 Node 24 이상이 필요하다(`package.json` engines).
+22 는 `--experimental-sqlite` 플래그가 있어야 하고 23.4 부터 플래그 없이 열린다. nvm 을 쓴다면
 이 디렉터리에서 `.nvmrc` 가 버전을 잡아 준다.
 
 ```bash
@@ -31,6 +32,7 @@ http://localhost:8787
 | `MAX_SSE_PER_IP` | `10` | **IP 하나가 열 수 있는** SSE 상한. 넘으면 429. 전역 상한만 있으면 한 사람이 슬롯을 전부 차지해 나머지를 밀어낼 수 있다 |
 | `TRUST_PROXY` | (자동) | 클라이언트 IP를 `X-Real-IP`/`X-Forwarded-For`에서 읽을지. 기본은 **loopback에서 온 요청만** 신뢰한다. Docker/PaaS처럼 프록시가 loopback이 아니면 `1` |
 | `HEALTH_TOKEN` | (없음) | 설정하면 `/api/health?token=…` 로만 상세 정보를 준다 |
+| `DATA_DIR` | systemd의 `STATE_DIRECTORY`, 없으면 `./data` | 잔액 기록 DB를 둘 곳. 서버에서는 `/var/lib/eth-dashboard` |
 
 잘못된 값(숫자가 아니거나 범위 밖, 주소 형식 오류, 라벨 누락, 주소 중복)은 부팅 시 바로 종료한다.
 
@@ -57,6 +59,73 @@ sudo systemctl reload eth-dashboard    # 또는: kill -HUP <pid>
   오타 하나에 새 프로세스가 부팅 중 죽고 systemd가 3초마다 되살리다 서비스가 통째로 내려간다
 - `rpcUrl`·`pollIntervalMs`·`PORT` 등은 타이머와 소켓에 이미 묶여 있어 리로드로 못 바꾼다.
   바뀐 게 감지되면 "재시작이 필요하다"고 로그에 남기고 무시한다
+
+## 잔액 기록 (SQLite)
+
+`DATA_DIR/balances.db` 에 쌓인다. 서버에서는 systemd 의 `StateDirectory=` 가 잡아 준
+`/var/lib/eth-dashboard` 다. **배포 디렉터리 밖이라 `deploy.sh` 의 `rsync --delete`
+가 닿지 않는다** — 배포할 때마다 기록이 날아가는 사고가 구조적으로 불가능하다.
+
+### 변한 순간만 적는다
+
+잔액은 계단 함수다. 값이 매 블록 바뀌는 게 아니라 실제로 돈이 움직인 블록에서만
+바뀌고 그 사이는 완전히 평평하다. 그래서 변화만 적어도 손실이 없다.
+
+> 블록 N 시점의 잔액 = N 이하에서 마지막으로 기록된 값
+
+매 블록 적으면 하루 7,200행 × 주소 수지만, 변화만 적으면 **하루 수십 행**이다.
+잔액이 0인 채로 안 움직이는 주소는 평생 1행이다.
+
+기록하는 순간은 두 가지뿐 — **변했을 때**, 그리고 **그 주소를 처음 봤을 때**.
+두 번째가 없으면 오래 안 움직인 주소는 그래프에 점이 하나도 안 생긴다.
+
+### `wei` 가 TEXT 인 이유
+
+SQLite 의 `INTEGER` 는 부호 있는 64비트라 최대 약 9.2×10^18 이다.
+1 ETH = 10^18 wei 이므로 **9 ETH 만 넘어도 넘친다.** `config.json` 의 WETH 컨트랙트는
+수백만 ETH 를 들고 있어 확실히 깨진다. INTEGER 로 바꿔 보면
+`2841337000000000000000000` 이 `2.841337e+24` 라는 부동소수점이 되어 돌아온다.
+프론트에서 wei 를 `Number` 로 바꾸지 않는 것과 같은 이유다.
+
+`PRIMARY KEY (address, block)` + `INSERT OR IGNORE` 라 같은 블록을 두 번 처리해도
+행이 늘지 않는다. 리로드 직후 `forceRefresh` 가 같은 블록을 다시 읽으므로 실제로 생긴다.
+
+### 재시작하면 복원된다
+
+부팅 때 주소별 마지막 기록을 읽어 delta 의 기준점과 스파크라인을 되살린다.
+지금까지는 재시작하면 첫 tick 의 delta 가 전부 0 이었다 — 비교할 이전 값이 없어서다.
+
+**서버가 오래 꺼져 있었다면 첫 화면에 큰 변동값이 한 번 튄다.** 버그가 아니라
+"꺼져 있는 동안 실제로 그만큼 움직였다"는 사실이다.
+
+### 저장소가 망가져도 대시보드는 산다
+
+디스크가 차거나 파일이 깨져도 잔액 표시는 계속된다. `storage.js` 는 어떤 이유로도
+던지지 않고, 마지막 오류만 `/api/health` 상세에 남긴다. 대시보드의 본업은 잔액을
+보여주는 것이지 기록을 남기는 것이 아니다.
+
+`fsync` 는 하지 않는다. 5초마다 디스크를 강제로 때리면 공용 서버에 부담이고,
+크래시 시 최후 몇 초를 잃는 건 이 용도에서 감수할 만하다. 모르고 빠뜨린 게 아니라
+고른 트레이드오프다.
+
+### 조회
+
+```
+GET /api/history?range=24h                  # 전 주소
+GET /api/history?address=0x…&range=7d       # 한 주소
+```
+
+`range` 는 `1h` · `24h` · `7d` 만 받는다.
+
+### 백업
+
+```bash
+sudo sqlite3 /var/lib/eth-dashboard/balances.db ".backup /tmp/balances-$(date +%F).db"
+```
+
+과거 잔액은 한 번 잃으면 다시 받아올 수 없다. 무료 RPC 는 최근 128블록 이전의
+state 를 주지 않는다. `teardown.sh` 가 이 디렉터리를 기본으로 남기는 이유다
+(정말 지우려면 `--purge-data`).
 
 ## 이메일 알림
 
@@ -135,6 +204,10 @@ Gmail 앱 비밀번호는 계정 비밀번호가 아니다. 2단계 인증을 �
 | `server.js` | 폴링 루프 + 상태 저장 + REST(`/api/snapshot`, `/api/health`) + SSE(`/api/stream`) |
 | `public/app.js` | SSE 수신 → wei 포맷 → DOM 부분 갱신 |
 | `public/styles.css` | 디자인 토큰 기반 스타일 (다크/라이트 자동) |
+| `storage.js` | SQLite. 변화만 적기, 부팅 복원. SQL 은 여기에만 있다 |
+| `validate.js` | 신뢰할 수 없는 입력의 첫 관문 (주소 형식, range 화이트리스트) |
+| `check-node.sh` | 이 장비의 Node 들을 찾아 `node:sqlite` 를 실제로 require 해 본다 |
+| `test/` | `npm test` (`node --test`). 외부 의존성 없음 |
 
 ## 설계상 중요한 결정 5가지
 
@@ -163,6 +236,27 @@ Gmail 앱 비밀번호는 계정 비밀번호가 아니다. 2단계 인증을 �
 자동 재연결하고, 일반 HTTP라 프록시/방화벽 문제가 적다. 브라우저에서 서버로
 명령을 보낼 일이 생기면 그때 WebSocket으로 바꾸면 된다.
 
+## 입력 신뢰 경계
+
+바깥에서 들어오는 값이 어디까지 가는지, 어디서 막히는지.
+
+| 종류 | 들어오는 곳 | 막는 방법 |
+|---|---|---|
+| **SQL injection** | `/api/history` 의 `address`·`range` | ① `validate.js` 가 형식·화이트리스트로 거른다 ② `storage.js` 가 값을 전부 `?` 로 바인딩한다 (문자열을 이어붙여 만든 SQL 은 한 줄도 없다) |
+| 경로 순회 | 정적 파일 요청 경로 | `path.resolve` 후 `startsWith(root + sep)` 검사 |
+| XSS | 서버가 내려준 잔액·라벨 | `innerHTML` 대신 `replaceChildren` + `textContent` |
+| HTTP 헤더 | `Host` | URL 파싱에 쓰지 않는다 (`Host: a b` 한 번에 서버가 죽은 적이 있다) |
+| 명령어 injection | `notify.js` 의 메일 발송 | `spawn('curl', [배열])` 로 셸을 거치지 않는다. 비밀번호는 argv 가 아니라 stdin |
+
+`range` 는 **검증이 아니라 치환**이다. 목록에 있으면 우리가 정한 숫자를 쓰고 없으면
+400 이라, 사용자가 보낸 문자열 자체가 SQL 로 흘러갈 경로가 아예 없다.
+화이트리스트를 평범한 객체로 만들었더니 `range=constructor` 에 `[Function: Object]`
+가 돌아와서, 상속 체인이 없는 `Map` 으로 바꿨다.
+
+이 방어들은 테스트로 고정돼 있다. injection 테스트 둘은 `history()` 를 문자열 조립으로
+바꾼 취약 버전에서 **실제로 실패하는 것까지 확인**했다. 한 번도 실패한 적 없는
+테스트는 헛된 안심만 준다.
+
 ## 잔액을 Number로 바꾸지 않는 이유
 
 1 ETH = 10^18 wei. JavaScript `Number`의 안전 정수 한계는 약 9×10^15이라
@@ -177,6 +271,7 @@ wei를 Number로 담는 순간 값이 깨진다. 그래서
 ```bash
 curl -s localhost:8787/api/health | python -m json.tool
 curl -s localhost:8787/api/snapshot | python -m json.tool | head -40
+curl -s 'localhost:8787/api/history?range=1h' | python -m json.tool | head -30
 ```
 
 ## 다음에 붙일 기능

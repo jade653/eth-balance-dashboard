@@ -23,7 +23,9 @@ SERVER_NAME=""                    # 이 서버는 80을 Traefik이 점유 -> ngi
                                   # 여기에 값을 넣으면 80 기반 설정이 만들어져 충돌하므로 비워 둔다.
 RPC_HTTP_URL=""                   # 전용 RPC 엔드포인트. 비우면 config.json 값 사용
 # 18 과 20 은 이미 EOL 이라 보안 패치가 나오지 않는다. 통과시키면 안 된다.
-NODE_MAJOR_MIN="22"               # package.json engines 요구사항
+# 그리고 storage.js 가 node:sqlite 를 쓴다. 22 는 --experimental-sqlite 플래그가
+# 있어야 하고 23.4 부터 플래그 없이 열리므로, 메이저 단위로 24 를 요구한다.
+NODE_MAJOR_MIN="24"               # package.json engines 요구사항
 NODE_MAJOR_INSTALL="24"           # Node 가 아예 없을 때 설치할 버전 (현행 LTS)
 NODE_SHIP_DIR="/opt/eth-dashboard-node"  # 홈 경로 node 를 복사해 둘 위치(아래 설명 참고)
 
@@ -300,7 +302,7 @@ if command -v rsync >/dev/null 2>&1; then
       --exclude ".git" --exclude "node_modules" \
       --exclude "deploy.sh" --exclude "deploy.env" --exclude "set-domain.sh" \
       --exclude "notify.env" --exclude "notify-state.json" --exclude "notify.log" \
-      --exclude ".gitignore" \
+      --exclude ".gitignore" --exclude "data" \
       "$SRC_DIR/" "$APP_DIR/"
 else
   run $SUDO cp -a "$SRC_DIR/." "$APP_DIR/"
@@ -333,6 +335,11 @@ WorkingDirectory=$APP_DIR
 Environment=NODE_ENV=production
 Environment=PORT=$APP_PORT
 $RPC_LINE
+# 잔액 기록을 둘 곳. systemd 가 /var/lib/$APP_NAME 을 만들어 소유권을 넘겨주고,
+# ProtectSystem=strict 아래서도 여기만 쓰기가 열린다. APP_DIR 밖이라 아래 rsync
+# --delete 가 닿지 않는다 -> 배포할 때마다 기록이 날아가는 사고가 불가능해진다.
+StateDirectory=$APP_NAME
+Environment=DATA_DIR=/var/lib/$APP_NAME
 ExecStart=$NODE_BIN $APP_DIR/server.js
 # 주소 목록만 바꿀 때는 restart 대신 reload -> SSE 연결과 잔액 히스토리가 유지된다
 ExecReload=/bin/kill -HUP \$MAINPID

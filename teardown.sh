@@ -7,6 +7,7 @@
 #   ./teardown.sh                    -> 지울 대상만 보여줌. 변경 없음 (기본값)
 #   ./teardown.sh --apply            -> 실제 삭제
 #   ./teardown.sh --apply --purge-src -> 스테이징 소스 디렉터리까지 삭제
+#   ./teardown.sh --apply --purge-data -> 잔액 기록(DB)까지 삭제
 #
 # 삭제 대상:
 #   - systemd 유닛 + 백업본(.bak.*)      /etc/systemd/system/eth-dashboard.service*
@@ -14,6 +15,11 @@
 #   - 복사해 둔 node 바이너리             /opt/eth-dashboard-node
 #   - 전용 시스템 계정/그룹               ethdash
 #   - nginx 사이트 설정 + 링크 + 백업본   (있는 경우에만)
+#
+# 기본으로 남기는 것:
+#   - 잔액 기록 DB                        /var/lib/eth-dashboard
+#     지웠다가 다시 올리는 경우가 훨씬 흔하고, 지우면 되돌릴 방법이 없다.
+#     정말 지우려면 --purge-data 를 준다.
 #
 # 건드리지 않는 것 (다른 사용자에게 영향이 가므로):
 #   - nginx 패키지 자체, nginx.conf, default 사이트, 남의 사이트 설정
@@ -26,6 +32,7 @@ APP_NAME="eth-dashboard"
 APP_USER="ethdash"
 APP_DIR="/opt/eth-dashboard"
 NODE_SHIP_DIR="/opt/eth-dashboard-node"
+DATA_DIR="/var/lib/eth-dashboard"
 APP_PORT="8787"
 
 UNIT_PATH="/etc/systemd/system/${APP_NAME}.service"
@@ -39,11 +46,12 @@ warn()  { printf '  [WARN] %s\n' "$*"; }
 head1() { printf '\n== %s ==\n' "$*"; }
 die()   { printf '  [FAIL] %s\n' "$*"; exit 1; }
 
-APPLY=0; PURGE_SRC=0
+APPLY=0; PURGE_SRC=0; PURGE_DATA=0
 for a in "$@"; do
   case "$a" in
-    --apply)     APPLY=1 ;;
-    --purge-src) PURGE_SRC=1 ;;
+    --apply)      APPLY=1 ;;
+    --purge-src)  PURGE_SRC=1 ;;
+    --purge-data) PURGE_DATA=1 ;;
     *)           die "알 수 없는 옵션: $a" ;;
   esac
 done
@@ -124,6 +132,20 @@ else
   ok "$NODE_SHIP_DIR 없음"
 fi
 
+# 잔액 기록은 기본으로 남긴다. 서비스를 지웠다 다시 올리는 경우가 훨씬 흔하고,
+# 한 번 지우면 과거 잔액은 어디서도 다시 받아올 수 없다(무료 RPC 는 최근 128블록
+# 이전 state 를 주지 않는다).
+if $SUDO test -e "$DATA_DIR"; then
+  $SUDO du -sh "$DATA_DIR" 2>/dev/null || true
+  if [ "$PURGE_DATA" -eq 1 ]; then
+    run $SUDO rm -rf "$DATA_DIR"
+  else
+    warn "$DATA_DIR 는 남깁니다 (잔액 기록). 지우려면 --purge-data 를 주세요."
+  fi
+else
+  ok "$DATA_DIR 없음"
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 head1 "5. 전용 계정 삭제"
 
@@ -172,4 +194,5 @@ else
   echo "  DRY RUN 이었습니다. 시스템은 변경되지 않았습니다."
   echo "  실제 삭제: ./teardown.sh --apply"
   echo "  소스까지:  ./teardown.sh --apply --purge-src"
+  echo "  기록까지:  ./teardown.sh --apply --purge-data"
 fi

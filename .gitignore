@@ -19,3 +19,6 @@ Thumbs.db
 # 알림 설정(Gmail 앱 비밀번호)과 상태 파일
 notify.env
 notify-state.json
+
+# 로컬 개발용 잔액 기록 DB (서버에서는 /var/lib/eth-dashboard 에 있다)
+data/
