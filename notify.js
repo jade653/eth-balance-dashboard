@@ -25,6 +25,7 @@ const STATE_PATH = process.env.NOTIFY_STATE || path.join(DIR, 'notify-state.json
 const mode = process.argv[2];
 const DRY = process.argv.includes('--dry-run');
 const VERBOSE = process.argv.includes('--verbose');   // SMTP 대화를 보여준다 (진단용)
+const RAW = process.argv.includes('--raw');           // 보내지 않고 메일 원문(MIME)을 출력
 if (mode !== 'daily' && mode !== 'check') {
   console.error('사용법: node notify.js daily|check [--dry-run]');
   process.exit(2);
@@ -118,6 +119,10 @@ function fmtDelta(wei) {
 }
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// 40자리 16진수를 그대로 9개 늘어놓으면 스팸 필터가 싫어한다.
+// 대시보드 화면과 같은 축약형을 쓰고, 전체 주소는 대시보드에서 본다.
+const shortAddr = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const kst = (ts) => new Date(ts).toLocaleString('ko-KR', { hour12: false });
 
 // ── 메일 본문 ───────────────────────────────────────────────────────────────
@@ -155,7 +160,7 @@ function balanceTable(accounts, prev) {
     const color = d === null || d === '0' ? '#6b7280' : (d.startsWith('-') ? '#b91c1c' : '#047857');
     return `<tr>`
       + `<td style="${CSS_TD}">${esc(a.label)}`
-      + `<div style="color:#9ca3af;font-size:11px;font-family:monospace">${esc(a.address)}</div></td>`
+      + `<div style="color:#9ca3af;font-size:11px;font-family:monospace">${esc(shortAddr(a.address))}</div></td>`
       + `<td style="${CSS_TD};text-align:right;font-variant-numeric:tabular-nums">${fmtEth(a.balanceWei)}</td>`
       + `<td style="${CSS_TD};text-align:right;color:${color};font-variant-numeric:tabular-nums">${esc(fmtDelta(d))}</td>`
       + `</tr>`;
@@ -172,21 +177,47 @@ function wrap(inner) {
     + `<p style="margin:24px 0 0;color:#9ca3af;font-size:11px">ETH Balance Monitor · ${esc(kst(Date.now()))}</p></div>`;
 }
 
+// HTML 만 보내는 메일은 대량발송으로 보인다. 같은 내용의 텍스트 파트를 함께 넣는다.
+function htmlToText(html) {
+  return html
+    .replace(/<\/(tr|div|p|h3|table)>/g, '\n')
+    .replace(/<\/t[dh]>/g, '\t')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // ── 발송 ────────────────────────────────────────────────────────────────────
 // 헤더/본문 모두 UTF-8 이므로 제목은 RFC 2047, 본문은 base64 로 감싼다.
 function buildMessage(subject, html) {
-  const b64 = Buffer.from(html, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
+  const b64 = (t) => Buffer.from(t, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
+  const bnd = `bnd_${Date.now().toString(36)}_${process.pid.toString(36)}`;
   return [
     `From: ETH Balance Monitor <${MAIL_FROM}>`,
     `To: ${MAIL_TO.join(', ')}`,
     `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${Date.now()}.${process.pid}@${EHLO_NAME}>`,
+    // 자동 발송임을 표준 방식으로 밝힌다. 수신 거부 경로가 있는 메일은
+    // 정상적인 알림으로 취급되고, 자동응답(부재중 등)도 되받지 않는다.
+    `List-Unsubscribe: <mailto:${MAIL_FROM}?subject=unsubscribe>`,
+    'Auto-Submitted: auto-generated',
     'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${bnd}"`,
+    '',
+    `--${bnd}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64(htmlToText(html)),
+    `--${bnd}`,
     'Content-Type: text/html; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
     '',
-    b64,
+    b64(html),
+    `--${bnd}--`,
     '',
   ].join('\r\n');
 }
@@ -195,18 +226,12 @@ function curlQuote(v) { return '"' + String(v).replace(/\\/g, '\\\\').replace(/"
 
 function send(subject, html) {
   const msg = buildMessage(subject, html);
+  if (RAW) { process.stdout.write(msg); return Promise.resolve(0); }   // MIME 구조 점검용
   if (DRY) {
     console.log('--- DRY RUN: 아래 메일을 보내지 않고 출력만 한다 ---');
     console.log(`받는 사람: ${MAIL_TO.join(', ')}`);
     console.log(`제목: ${subject}`);
-    // 태그만 지우면 한 덩어리가 되므로, 줄/칸 구분을 먼저 넣고 지운다
-    console.log(html
-      .replace(/<\/(tr|div|p|h3|table)>/g, '\n')
-      .replace(/<\/t[dh]>/g, '\t')
-      .replace(/<[^>]+>/g, '')
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim());
+    console.log(htmlToText(html));
     return Promise.resolve(0);
   }
 
