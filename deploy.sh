@@ -298,6 +298,8 @@ if command -v rsync >/dev/null 2>&1; then
   run $SUDO rsync -a --delete \
       --exclude ".git" --exclude "node_modules" \
       --exclude "deploy.sh" --exclude "deploy.env" --exclude "set-domain.sh" \
+      --exclude "notify.env" --exclude "notify-state.json" --exclude "notify.log" \
+      --exclude ".gitignore" \
       "$SRC_DIR/" "$APP_DIR/"
 else
   run $SUDO cp -a "$SRC_DIR/." "$APP_DIR/"

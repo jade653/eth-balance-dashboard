@@ -51,6 +51,37 @@ sudo systemctl reload eth-dashboard    # 또는: kill -HUP <pid>
 - `rpcUrl`·`pollIntervalMs`·`PORT` 등은 타이머와 소켓에 이미 묶여 있어 리로드로 못 바꾼다.
   바뀐 게 감지되면 "재시작이 필요하다"고 로그에 남기고 무시한다
 
+## 이메일 알림
+
+`notify.js` 가 두 가지 일을 한다. cron 에 등록되어 있다 (`crontab -l`).
+
+| 시각 | 하는 일 |
+|---|---|
+| 매일 09:00 KST | 일일 리포트. 상태 + 주소별 잔액 + **전일 대비 변동** |
+| 10분마다 | health 점검. **장애/복구 시에만** 발송 (같은 장애 재알림은 60분 쿨다운) |
+
+전일 대비 변동은 어제 보낸 값을 `notify-state.json` 에 저장해 두고 비교한다.
+과거 블록을 다시 조회하지 않는 이유는, 무료 RPC 가 보통 최근 128블록 이전의
+state 를 주지 않기 때문이다. 그래서 첫 리포트에는 비교값이 없다.
+
+### 설정
+
+```bash
+cp notify.env.example notify.env
+chmod 600 notify.env
+$EDITOR notify.env          # Gmail 계정 / 앱 비밀번호 / 받는 사람
+node notify.js daily --dry-run   # 보내지 않고 내용만 확인
+```
+
+Gmail 앱 비밀번호는 계정 비밀번호가 아니다. 2단계 인증을 켠 뒤
+<https://myaccount.google.com/apppasswords> 에서 16자리를 발급받는다.
+
+의존성을 늘리지 않으려고 SMTP 발송은 `curl` 에 맡긴다. 비밀번호는 `ps` 로 다른
+사용자에게 보이지 않도록 명령줄이 아니라 curl 설정을 stdin 으로 넘겨 전달한다.
+
+`notify.env` 와 `notify-state.json` 은 커밋되지 않고 배포(rsync)에서도 제외된다.
+설정 전까지는 실행할 때마다 `notify.log` 에 "notify.env 가 없다"만 남기고 끝난다.
+
 ## 구조
 
 ```
