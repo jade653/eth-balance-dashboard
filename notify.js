@@ -4,7 +4,8 @@
 /**
  * 대시보드 상태 알림.
  *
- *   node notify.js daily     매일 아침 리포트 (무조건 발송)
+ *   node notify.js daily     매일 아침 잔액 리포트 (무조건 발송)
+ *   node notify.js status    매일 아침 서버 상태 (개발자용, 무조건 발송)
  *   node notify.js check     health 점검 -> 장애/복구 시에만 발송
  *   node notify.js <mode> --dry-run   보내지 않고 메일 본문만 출력
  *
@@ -23,11 +24,12 @@ const ENV_PATH = process.env.NOTIFY_ENV || path.join(DIR, 'notify.env');   // �
 const STATE_PATH = process.env.NOTIFY_STATE || path.join(DIR, 'notify-state.json');
 
 const mode = process.argv[2];
+const MODES = ['daily', 'status', 'check'];
 const DRY = process.argv.includes('--dry-run');
 const VERBOSE = process.argv.includes('--verbose');   // SMTP 대화를 보여준다 (진단용)
 const RAW = process.argv.includes('--raw');           // 보내지 않고 메일 원문(MIME)을 출력
-if (mode !== 'daily' && mode !== 'check') {
-  console.error('사용법: node notify.js daily|check [--dry-run]');
+if (!MODES.includes(mode)) {
+  console.error(`사용법: node notify.js ${MODES.join('|')} [--dry-run] [--verbose] [--raw]`);
   process.exit(2);
 }
 
@@ -70,6 +72,7 @@ const list = (v) => (v || '').split(',').map((x) => x.trim()).filter(Boolean);
 const MAIL_TO_ALL = list(need('MAIL_TO'));
 const MAIL_TO_DAILY = list(env.MAIL_TO_DAILY).length ? list(env.MAIL_TO_DAILY) : MAIL_TO_ALL;
 const MAIL_TO_ALERT = list(env.MAIL_TO_ALERT).length ? list(env.MAIL_TO_ALERT) : MAIL_TO_ALL;
+// daily(잔액 리포트)만 재단 쪽과 공유하고, status/check 는 개발자용이다
 const MAIL_TO = mode === 'daily' ? MAIL_TO_DAILY : MAIL_TO_ALERT;
 const APP_URL = (env.APP_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const PUBLIC_URL = (env.PUBLIC_URL || '').replace(/\/$/, '');
@@ -308,7 +311,11 @@ function send(subject, html) {
         wrap(banner(false, `${title}: ${detail.status ?? '응답 없음'}`)
           + healthTable(detail, true)
           + (detail.lastError ? `<p style="font-size:13px;color:#b91c1c">${esc(detail.lastError)}</p>` : '')));
-      saveState({ ...state, down: true, lastAlertAt: now });
+      saveState({
+        ...state, down: true, lastAlertAt: now,
+        // 최근 7일치만 남긴다. 매일 아침 상태 메일이 이걸로 24시간 요약을 만든다
+        alerts: [...(state.alerts || []), now].filter((t) => now - t < 7 * 86400_000),
+      });
       return;
     }
 
@@ -322,6 +329,29 @@ function send(subject, html) {
     // 정작 봐야 할 줄이 묻힌다. 대신 상태 파일에 마지막 점검 시각을 남겨
     // "cron 이 돌고는 있는가"를 확인할 수 있게 한다.
     saveState({ ...state, down: false, lastCheckAt: now });
+    return;
+  }
+
+  // ── status: 개발자용 일일 서버 상태. 장애가 없어도 매일 보낸다.
+  // 장애 시에만 오는 알림 체계는 "문제가 없는 것"과 "알림이 고장난 것"을
+  // 구분할 수 없다. 매일 한 통이 오는 것 자체가 알림 경로의 생존 증명이다.
+  if (mode === 'status') {
+    const now = Date.now();
+    const last24 = (state.alerts || []).filter((t) => now - t < 86400_000);
+    const summary = last24.length === 0
+      ? '지난 24시간 장애 알림 없음'
+      : `지난 24시간 장애 알림 ${last24.length}회 (마지막 ${kst(last24[last24.length - 1])})`;
+    const checked = state.lastCheckAt
+      ? `마지막 자동 점검 ${kst(state.lastCheckAt)}`
+      : '자동 점검 기록 없음 — cron 이 도는지 확인이 필요하다';
+
+    await send(
+      `[ETH 대시보드] 서버 상태 — ${healthy ? '정상' : '이상'} · ${new Date().toLocaleDateString('ko-KR')}`,
+      wrap(banner(healthy, healthy ? '정상 동작 중' : `이상 — ${detail.status ?? '응답 없음'}`)
+        + healthTable(detail, true)
+        + `<p style="font-size:13px;margin:0 0 4px">${esc(summary)}</p>`
+        + `<p style="font-size:12px;color:#6b7280;margin:0">${esc(checked)}</p>`
+        + (detail.lastError ? `<p style="font-size:13px;color:#b91c1c">${esc(detail.lastError)}</p>` : '')));
     return;
   }
 
