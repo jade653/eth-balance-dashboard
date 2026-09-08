@@ -104,3 +104,55 @@ test('injection: 숫자 자리로도 남의 기록이 새지 않는다', () => {
   assert.deepEqual(store.history(A, '0 OR 1=1'), []);
   store.close();
 });
+
+/* ── 부팅 복원 ────────────────────────────────────────────────────────────
+   재시작하면 지금은 히스토리가 통째로 사라지고 첫 tick 의 delta 가 전부 0 이 된다.
+   비교할 이전 값이 없기 때문이다. 주소별 마지막 기록을 되살려 그 기준점을 준다.  */
+
+test('주소별 마지막 기록만 골라 준다', () => {
+  const store = new Store({ path: tmpDb() });
+  store.append([
+    { address: A, block: 100, ts: 1000, wei: '5' },
+    { address: A, block: 200, ts: 2000, wei: '9' },
+    { address: B, block: 150, ts: 1500, wei: '7' },
+  ]);
+
+  assert.deepEqual(
+    store.latest(),
+    new Map([
+      [A, { block: 200, ts: 2000, wei: '9' }],
+      [B, { block: 150, ts: 1500, wei: '7' }],
+    ])
+  );
+  store.close();
+});
+
+/* ── 저장소가 망가져도 대시보드는 산다 ────────────────────────────────────
+   이 대시보드의 본업은 잔액을 보여주는 것이지 기록을 남기는 것이 아니다.
+   디스크가 차거나 파일이 깨져서 저장이 안 되더라도 화면은 계속 나와야 한다.
+   닫힌 Store 를 쓰는 것으로 '핸들이 더 이상 쓸 수 없는 상태' 를 흉내낸다.     */
+
+test('저장이 실패해도 던지지 않는다', () => {
+  const store = new Store({ path: tmpDb() });
+  store.close();
+
+  assert.doesNotThrow(() => store.append([{ address: A, block: 100, ts: 1000, wei: '5' }]));
+});
+
+test('저장이 실패하면 status 에 남는다', () => {
+  const store = new Store({ path: tmpDb() });
+  store.close();
+
+  store.append([{ address: A, block: 100, ts: 1000, wei: '5' }]);
+
+  assert.equal(store.status.ok, false);
+  assert.match(store.status.error, /\S/);   // 빈 문자열이 아니어야 한다
+});
+
+test('조회가 실패해도 던지지 않고 빈 결과를 준다', () => {
+  const store = new Store({ path: tmpDb() });
+  store.close();
+
+  assert.deepEqual(store.history(A, 0), []);
+  assert.deepEqual(store.latest(), new Map());
+});

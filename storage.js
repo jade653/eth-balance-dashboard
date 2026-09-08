@@ -15,6 +15,8 @@ const { DatabaseSync } = require('node:sqlite');
  */
 class Store {
   constructor({ path }) {
+    // 마지막으로 실패한 이유. 성공하면 지워진다 (server.js 의 state.lastError 와 같은 방식).
+    this.error = null;
     this.db = new DatabaseSync(path);
 
     // wei 가 TEXT 인 이유: SQLite 의 INTEGER 는 부호 있는 64비트라 최대 약 9.2e18 이다.
@@ -41,19 +43,56 @@ class Store {
     this.stHistory = this.db.prepare(
       'SELECT block, ts, wei FROM balances WHERE address = ? AND ts >= ? ORDER BY block'
     );
+
+    // MAX() 를 쓴 집계 질의에서 나머지 컬럼은 그 최댓값을 낸 행의 값이 온다.
+    // SQLite 가 문서로 보장하는 동작이다.
+    this.stLatest = this.db.prepare(
+      'SELECT address, MAX(block) AS block, ts, wei FROM balances GROUP BY address'
+    );
   }
 
-  // 이미 있는 (address, block) 은 조용히 무시된다. 던지지 않는다.
+  // 이미 있는 (address, block) 은 조용히 무시된다.
+  //
+  // 어떤 이유로든 던지지 않는다. 이 대시보드의 본업은 잔액을 보여주는 것이지
+  // 기록을 남기는 것이 아니다. 디스크가 차서 저장이 안 된다고 폴링 루프까지
+  // 멈추면, 고장 하나가 고장 둘이 된다.
   append(records) {
-    for (const r of records) this.stInsert.run(r.address, r.block, r.ts, r.wei);
+    try {
+      for (const r of records) this.stInsert.run(r.address, r.block, r.ts, r.wei);
+      this.error = null;
+    } catch (err) {
+      this.error = err.message;
+    }
   }
 
   // node:sqlite 는 프로토타입이 null 인 객체를 돌려준다. 그대로 흘려보내면 부르는 쪽이
   // SQLite 의 구현 세부를 떠안게 되므로 평범한 객체로 바꿔서 넘긴다.
   history(address, sinceTs) {
-    return this.stHistory
-      .all(address, sinceTs)
-      .map((r) => ({ block: r.block, ts: r.ts, wei: r.wei }));
+    try {
+      return this.stHistory
+        .all(address, sinceTs)
+        .map((r) => ({ block: r.block, ts: r.ts, wei: r.wei }));
+    } catch (err) {
+      this.error = err.message;
+      return [];
+    }
+  }
+
+  // 주소별 마지막 기록. 부팅 시 delta 의 기준점을 되살리는 데 쓴다.
+  latest() {
+    const out = new Map();
+    try {
+      for (const r of this.stLatest.all()) {
+        out.set(r.address, { block: r.block, ts: r.ts, wei: r.wei });
+      }
+    } catch (err) {
+      this.error = err.message;
+    }
+    return out;
+  }
+
+  get status() {
+    return { ok: this.error === null, error: this.error };
   }
 
   close() {
