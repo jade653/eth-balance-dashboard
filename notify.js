@@ -63,7 +63,14 @@ const SMTP_PORT = env.SMTP_PORT || '587';
 const SMTP_USER = need('SMTP_USER');
 const SMTP_PASS = need('SMTP_PASS');
 const MAIL_FROM = env.MAIL_FROM || SMTP_USER;
-const MAIL_TO = need('MAIL_TO').split(',').map((s) => s.trim()).filter(Boolean);
+// 받는 사람은 용도별로 나눌 수 있다. 일일 리포트에는 잔액이 들어가지만
+// 장애 알림은 "대시보드가 죽었다"는 사실뿐이라, 공유 범위가 다를 수 있다.
+// MAIL_TO_DAILY / MAIL_TO_ALERT 를 비워두면 둘 다 MAIL_TO 를 쓴다.
+const list = (v) => (v || '').split(',').map((x) => x.trim()).filter(Boolean);
+const MAIL_TO_ALL = list(need('MAIL_TO'));
+const MAIL_TO_DAILY = list(env.MAIL_TO_DAILY).length ? list(env.MAIL_TO_DAILY) : MAIL_TO_ALL;
+const MAIL_TO_ALERT = list(env.MAIL_TO_ALERT).length ? list(env.MAIL_TO_ALERT) : MAIL_TO_ALL;
+const MAIL_TO = mode === 'daily' ? MAIL_TO_DAILY : MAIL_TO_ALERT;
 const APP_URL = (env.APP_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const PUBLIC_URL = (env.PUBLIC_URL || '').replace(/\/$/, '');
 const COOLDOWN_MIN = Number(env.ALERT_COOLDOWN_MIN || 60);
