@@ -143,13 +143,17 @@ function banner(okState, text) {
     + `font-weight:600;font-size:14px;margin:0 0 16px">${esc(text)}</div>`;
 }
 
-function healthTable(h) {
+// detailed: RPC 상태와 접속자 수까지 넣는다. 장애 알림에는 원인 파악에 필요하지만,
+// 매일 아침 리포트에는 잔액만 보면 되므로 넣지 않는다.
+function healthTable(h, detailed = false) {
   const rows = [
     ['상태', h.status ?? '—'],
     ['블록', h.block != null ? '#' + h.block.toLocaleString() : '—'],
     ['마지막 갱신', h.updatedAt ? kst(h.updatedAt) : '—'],
-    ['RPC', h.rpc ? `${h.rpc.active} · ${h.rpc.lastLatencyMs}ms · 실패 ${h.rpc.errors}/${h.rpc.requests}` : '—'],
-    ['접속자', h.subscribers != null ? `${h.subscribers}명 (IP ${h.uniqueIps})` : '—'],
+    ...(detailed ? [
+      ['RPC', h.rpc ? `${h.rpc.active} · ${h.rpc.lastLatencyMs}ms · 실패 ${h.rpc.errors}/${h.rpc.requests}` : '—'],
+      ['접속자', h.subscribers != null ? `${h.subscribers}명 (IP ${h.uniqueIps})` : '—'],
+    ] : []),
   ];
   return `<table style="border-collapse:collapse;width:100%;margin:0 0 20px">`
     + rows.map(([k, v]) => `<tr><td style="${CSS_TD};color:#6b7280;width:110px">${esc(k)}</td>`
@@ -302,7 +306,7 @@ function send(subject, html) {
       const title = wasDown ? '장애 지속' : '장애 발생';
       await send(`[ETH 대시보드] ${title} — ${detail.status ?? '응답 없음'}`,
         wrap(banner(false, `${title}: ${detail.status ?? '응답 없음'}`)
-          + healthTable(detail)
+          + healthTable(detail, true)
           + (detail.lastError ? `<p style="font-size:13px;color:#b91c1c">${esc(detail.lastError)}</p>` : '')));
       saveState({ ...state, down: true, lastAlertAt: now });
       return;
@@ -310,7 +314,7 @@ function send(subject, html) {
 
     if (wasDown) {
       await send('[ETH 대시보드] 복구됨',
-        wrap(banner(true, '복구됨 — 정상 동작 중') + healthTable(detail)));
+        wrap(banner(true, '복구됨 — 정상 동작 중') + healthTable(detail, true)));
       saveState({ ...state, down: false, lastAlertAt: null });
       return;
     }
