@@ -163,7 +163,7 @@ function healthTable(h, detailed = false) {
 
 function balanceTable(accounts, prev) {
   const head = `<tr><th style="${CSS_TH}">주소</th><th style="${CSS_TH};text-align:right">잔액 (ETH)</th>`
-    + `<th style="${CSS_TH};text-align:right">전일 대비</th></tr>`;
+    + `<th style="${CSS_TH};text-align:right">기준 대비</th></tr>`;
   const body = accounts.map((a) => {
     const before = prev ? prev[a.address.toLowerCase()] : undefined;
     const d = (before !== undefined && a.balanceWei !== null)
@@ -333,11 +333,20 @@ function send(subject, html) {
     + healthTable(detail);
 
   if (accounts.length) {
-    inner += `<h3 style="font-size:13px;margin:0 0 8px;color:#374151">주소별 잔액</h3>`
+    const ago = state.lastDailyAt
+      ? (() => {
+          const h = (Date.now() - state.lastDailyAt) / 3_600_000;
+          return h < 1 ? `${Math.round(h * 60)}분 전` : h < 48 ? `${Math.round(h)}시간 전` : `${Math.round(h / 24)}일 전`;
+        })()
+      : null;
+    inner += `<h3 style="font-size:13px;margin:0 0 4px;color:#374151">주소별 잔액</h3>`
+      + (ago
+        ? `<p style="color:#9ca3af;font-size:11px;margin:0 0 8px">기준: ${esc(kst(state.lastDailyAt))} 리포트 (${esc(ago)})</p>`
+        : `<div style="margin:0 0 8px"></div>`)
       + balanceTable(accounts, state.lastDaily);
     if (!state.lastDaily) {
       inner += `<p style="color:#9ca3af;font-size:12px;margin:10px 0 0">`
-        + `첫 리포트라 비교할 어제 값이 없다. 내일부터 전일 대비 변동이 표시된다.</p>`;
+        + `첫 리포트라 비교할 기준값이 없다. 다음 리포트부터 변동이 표시된다.</p>`;
     }
   } else {
     inner += `<p style="color:#b91c1c;font-size:13px">잔액을 가져오지 못했다.</p>`;
@@ -350,8 +359,16 @@ function send(subject, html) {
   // 발송에 성공했을 때만 기준값을 갱신한다.
   // 실패한 날 갱신해 버리면 그날의 변동이 통째로 사라진다.
   if (code === 0 && accounts.length) {
-    const snap = {};
-    for (const a of accounts) if (a.balanceWei !== null) snap[a.address.toLowerCase()] = a.balanceWei;
-    saveState({ ...state, lastDaily: snap, lastDailyAt: Date.now() });
+    const day = (t) => new Date(t).toLocaleDateString('sv-SE');   // YYYY-MM-DD (로컬)
+    const sameDay = state.lastDailyAt && day(state.lastDailyAt) === day(Date.now());
+    if (sameDay) {
+      // 오늘 이미 기준값을 잡았다. 수동으로 몇 번을 더 돌려도 덮어쓰지 않는다 —
+      // 덮어쓰면 다음 리포트의 "변동"이 하루치가 아니라 몇 분치가 된다.
+      console.log(`기준값 유지 (오늘 ${kst(state.lastDailyAt)} 에 기록됨)`);
+    } else {
+      const snap = {};
+      for (const a of accounts) if (a.balanceWei !== null) snap[a.address.toLowerCase()] = a.balanceWei;
+      saveState({ ...state, lastDaily: snap, lastDailyAt: Date.now() });
+    }
   }
 })();
