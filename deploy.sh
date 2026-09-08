@@ -22,8 +22,9 @@ APP_PORT="8787"                   # server.js 가 listen 할 포트 (외부 미�
 SERVER_NAME=""                    # 이 서버는 80을 Traefik이 점유 -> nginx/TLS는 set-domain.sh 가 443으로 담당.
                                   # 여기에 값을 넣으면 80 기반 설정이 만들어져 충돌하므로 비워 둔다.
 RPC_HTTP_URL=""                   # 전용 RPC 엔드포인트. 비우면 config.json 값 사용
-NODE_MAJOR_MIN="18"               # package.json engines 요구사항
-NODE_MAJOR_INSTALL="22"           # Node 가 아예 없을 때 설치할 버전
+# 18 과 20 은 이미 EOL 이라 보안 패치가 나오지 않는다. 통과시키면 안 된다.
+NODE_MAJOR_MIN="22"               # package.json engines 요구사항
+NODE_MAJOR_INSTALL="24"           # Node 가 아예 없을 때 설치할 버전 (현행 LTS)
 NODE_SHIP_DIR="/opt/eth-dashboard-node"  # 홈 경로 node 를 복사해 둘 위치(아래 설명 참고)
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 이 스크립트가 있는 곳 = 소스 디렉터리
