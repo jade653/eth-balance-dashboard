@@ -156,3 +156,17 @@ test('조회가 실패해도 던지지 않고 빈 결과를 준다', () => {
   assert.deepEqual(store.history(A, 0), []);
   assert.deepEqual(store.latest(), new Map());
 });
+
+test('DB 를 열 수 없어도 생성자가 던지지 않는다', () => {
+  // 디렉터리가 없는 경로. 권한 문제나 디스크 고장도 같은 자리에서 터진다.
+  let store;
+  assert.doesNotThrow(() => {
+    store = new Store({ path: '/nonexistent-dir-for-test/balances.db' });
+  });
+  assert.equal(store.status.ok, false);
+
+  // 열지 못한 뒤에도 쓰기/조회가 조용히 넘어가야 서버가 계속 뜬다
+  assert.doesNotThrow(() => store.append([{ address: A, block: 1, ts: 1, wei: '1' }]));
+  assert.deepEqual(store.history(A, 0), []);
+  assert.deepEqual(store.latest(), new Map());
+});

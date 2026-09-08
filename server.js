@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { RpcClient } = require('./rpc.js');
+const { Store } = require('./storage.js');
+const { isAddress, rangeSeconds } = require('./validate.js');
 
 // ── 설정 ────────────────────────────────────────────────────────────────────
 // 잘못된 값은 조용히 넘어가지 않고 부팅 시 바로 죽인다. (POLL_MS=abc → NaN →
@@ -49,15 +51,21 @@ const TRUST_PROXY = process.env.TRUST_PROXY === undefined
 const SSE_MAX_BUFFER = 1 << 20;          // 이만큼(1MB) 읽어가지 않은 SSE 클라이언트는 끊는다
 const STALE_AFTER_MS = POLL_MS * 6;      // 이만큼 성공한 폴링이 없으면 헬스체크가 503을 낸다
 
+// 데이터는 APP_DIR 밖에 둔다. deploy.sh 의 rsync --delete 가 닿지 않는 자리라
+// 배포할 때마다 기록이 날아가는 사고가 구조적으로 불가능해진다.
+// systemd 에 StateDirectory= 를 주면 STATE_DIRECTORY 로 경로를 알려준다.
+const DATA_DIR = process.env.DATA_DIR || process.env.STATE_DIRECTORY || path.join(__dirname, 'data');
+// 여기서 실패해도 죽지 않는다. Store 가 열지 못한 채로 뜨고, 대시보드는 계속 돈다.
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* Store 가 이어서 실패한다 */ }
+const store = new Store({ path: path.join(DATA_DIR, 'balances.db') });
+
 // 부팅과 SIGHUP 리로드가 같은 규칙을 쓰도록 검증을 한 곳에 모은다.
 // 부팅 때는 실패가 곧 종료지만, 리로드 때는 던져서 "기존 설정 유지"로 흡수한다.
-const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
-
 function validateAddresses(list) {
   if (!Array.isArray(list) || list.length === 0) throw new Error('addresses 가 비어 있다');
   const seen = new Set();
   for (const a of list) {
-    if (!ADDR_RE.test(a?.address ?? '')) throw new Error(`주소 형식이 잘못됐다: ${a?.label ?? '?'} ${a?.address}`);
+    if (!isAddress(a?.address)) throw new Error(`주소 형식이 잘못됐다: ${a?.label ?? '?'} ${a?.address}`);
     // 라벨이 없으면 프론트의 정렬(localeCompare)이 TypeError로 죽어 화면 전체가 멈춘다
     if (typeof a.label !== 'string' || a.label.trim() === '') throw new Error(`label 이 비어 있다: ${a.address}`);
     // 주소가 겹치면 프론트가 주소를 키로 행을 관리하므로 한 줄만 그려진다
@@ -164,9 +172,14 @@ async function tick() {
       txCount: Array.isArray(block?.transactions) ? block.transactions.length : null,
     };
 
+    // 블록 시각을 시간축으로 쓴다. 노드가 안 주면 지금 시각으로 대신한다.
+    const blockTs = state.block.timestamp ?? Math.floor(Date.now() / 1000);
+    const records = [];
+
     accounts.forEach((acct, i) => {
       const next = BigInt(balances[i]);
-      const prev = acct.balanceWei === null ? next : BigInt(acct.balanceWei);
+      const first = acct.balanceWei === null;
+      const prev = first ? next : BigInt(acct.balanceWei);
       const delta = next - prev;
       if (delta !== 0n) acct.lastChangedBlock = blockNumber;
       acct.balanceWei = next.toString();
@@ -177,7 +190,21 @@ async function tick() {
       else acct.history.push({ block: blockNumber, balanceWei: acct.balanceWei });
       // shift 가 아니라 splice: HISTORY 가 리로드로 줄어들면 한 번에 잘라내야 한다
       if (acct.history.length > HISTORY) acct.history.splice(0, acct.history.length - HISTORY);
+
+      // 변한 순간과 처음 본 순간만 남긴다. 잔액은 계단 함수라 그것만으로 무손실이고,
+      // 처음 본 기록이 없으면 오래 안 움직인 주소는 그래프에 점이 하나도 안 생긴다.
+      if (first || delta !== 0n) {
+        records.push({
+          address: acct.address.toLowerCase(),
+          block: blockNumber,
+          ts: blockTs,
+          wei: acct.balanceWei,
+        });
+      }
     });
+
+    // 저장이 실패해도 던지지 않는다. 잔액 표시는 저장과 무관하게 계속되어야 한다.
+    if (records.length) store.append(records);
 
     state.status = 'live';
     state.lastError = null;
@@ -352,8 +379,43 @@ function handle(req, res) {
       body.subscribers = clients.size;
       body.uniqueIps = perIp.size;
       body.addresses = state.accounts.length;
+      // 저장이 조용히 실패하고 있으면 여기서만 보인다. notify.js 의 status 메일이
+      // 로컬로 이 엔드포인트를 읽으므로 그 경로로 눈에 띈다.
+      body.storage = store.status;
     }
     return json(res, ok ? 200 : 503, body);
+  }
+
+  if (url.pathname === '/api/history') {
+    // 1층 방어. 이상한 값은 여기서 걸러져 SQL 근처에도 가지 못한다.
+    // range 는 검증이 아니라 '치환'이다 -- 목록에 있으면 우리가 정한 숫자를 쓰고,
+    // 없으면 400 이다. 사용자가 보낸 문자열 자체는 어디로도 흘러가지 않는다.
+    const range = url.searchParams.get('range');
+    const seconds = rangeSeconds(range);
+    if (seconds === null) return json(res, 400, { error: 'bad range' });
+
+    const raw = url.searchParams.get('address');
+    let wanted = state.accounts;
+    if (raw !== null) {
+      if (!isAddress(raw)) return json(res, 400, { error: 'bad address' });
+      const key = raw.toLowerCase();
+      wanted = state.accounts.filter((a) => a.address.toLowerCase() === key);
+      // 형식은 맞지만 감시 목록에 없는 주소. 빈 배열로 답하면 '기록이 없다'와
+      // '아예 안 보는 주소다'가 구분되지 않는다.
+      if (wanted.length === 0) return json(res, 404, { error: 'unknown address' });
+    }
+
+    const since = Math.floor(Date.now() / 1000) - seconds;
+    return json(res, 200, {
+      range,
+      since,
+      accounts: wanted.map((a) => ({
+        address: a.address,
+        label: a.label,
+        // 2층 방어는 storage.js 안에 있다. 값은 전부 ? 로 바인딩된다.
+        records: store.history(a.address.toLowerCase(), since),
+      })),
+    });
   }
 
   if (url.pathname === '/api/stream') {
@@ -512,6 +574,31 @@ process.on('uncaughtException', (err) => survive('uncaughtException', err));
 process.on('unhandledRejection', (err) => survive('unhandledRejection', err));
 
 // ── 부팅 / 종료 ─────────────────────────────────────────────────────────────
+// 재시작하면 지금까지는 히스토리가 통째로 사라지고 첫 tick 의 delta 가 전부 0 이 됐다.
+// 비교할 이전 값이 없어서다. 저장해 둔 마지막 기록으로 그 기준점을 되살린다.
+function restore() {
+  const latest = store.latest();
+  let restored = 0;
+
+  for (const acct of state.accounts) {
+    const key = acct.address.toLowerCase();
+    const last = latest.get(key);
+    if (!last) continue;
+    acct.balanceWei = last.wei;
+    acct.lastChangedBlock = last.block;
+    // 저장된 건 '변한 순간'뿐이라 이것만으로 계단이 그대로 복원된다.
+    acct.history = store
+      .history(key, 0)
+      .slice(-HISTORY)
+      .map((r) => ({ block: r.block, balanceWei: r.wei }));
+    restored += 1;
+  }
+
+  log(`storage    ${DATA_DIR} (복원 ${restored}/${state.accounts.length} addresses)`);
+  if (!store.status.ok) log(`storage 경고: ${store.status.error} -- 기록 없이 계속 서빙한다`);
+  invalidateSnapshot();
+}
+
 let pollTimer = null;
 let pingTimer = null;
 
@@ -522,6 +609,7 @@ function shutdown(signal) {
   for (const res of clients) res.end();   // 브라우저 EventSource가 알아서 재연결한다
   clients.clear();
   perIp.clear();
+  store.close();
   server.close(() => process.exit(0));
   server.closeAllConnections?.();
   setTimeout(() => process.exit(0), 5000).unref();
@@ -550,6 +638,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
     log(`chainId 조회 실패: ${err.message}`);
   }
 
+  restore();
   await tick();
   pollTimer = setInterval(tick, POLL_MS);
   pingTimer = setInterval(() => broadcast({ type: 'ping' }), 25_000); // 프록시가 유휴 연결을 끊지 않도록

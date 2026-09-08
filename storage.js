@@ -12,49 +12,59 @@ const { DatabaseSync } = require('node:sqlite');
  *
  * SQL 은 이 파일에만 있고, 값은 전부 ? 로만 들어간다. 문자열을 이어붙여 만든
  * SQL 은 여기 한 줄도 없다.
+ *
+ * 그리고 이 클래스는 어떤 경우에도 던지지 않는다. 대시보드의 본업은 잔액을
+ * 보여주는 것이지 기록을 남기는 것이 아니다. 디스크가 차거나 파일이 깨져서
+ * 저장이 안 되더라도 화면은 계속 나와야 한다.
  */
 class Store {
   constructor({ path }) {
-    // 마지막으로 실패한 이유. 성공하면 지워진다 (server.js 의 state.lastError 와 같은 방식).
-    this.error = null;
-    this.db = new DatabaseSync(path);
+    this.error = null;      // 마지막으로 실패한 이유. 성공하면 지워진다
+    this.db = null;
 
-    // wei 가 TEXT 인 이유: SQLite 의 INTEGER 는 부호 있는 64비트라 최대 약 9.2e18 이다.
-    // 1 ETH = 1e18 wei 이므로 9 ETH 만 넘어도 넘친다. config.json 의 WETH 컨트랙트는
-    // 수백만 ETH(약 1e24 wei)를 들고 있어 INTEGER 로는 확실히 깨진다. INTEGER 로 바꾸면
-    // 2841337000000000000000000 이 2.841337e+24 라는 부동소수점이 되어 돌아온다.
-    // 서버가 BigInt 로 계산해 10진 문자열로 넘기는 것과 같은 이유다.
-    //
-    // (address, block) 을 기본키로 두면 같은 블록을 두 번 처리해도 행이 늘지 않는다.
-    // server.js 의 forceRefresh 가 리로드 직후 같은 블록을 다시 읽으므로 실제로 생긴다.
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS balances (
-        address TEXT    NOT NULL,
-        block   INTEGER NOT NULL,
-        ts      INTEGER NOT NULL,
-        wei     TEXT    NOT NULL,
-        PRIMARY KEY (address, block)
-      ) WITHOUT ROWID
-    `);
+    try {
+      this.db = new DatabaseSync(path);
 
-    this.stInsert = this.db.prepare(
-      'INSERT OR IGNORE INTO balances (address, block, ts, wei) VALUES (?, ?, ?, ?)'
-    );
-    this.stHistory = this.db.prepare(
-      'SELECT block, ts, wei FROM balances WHERE address = ? AND ts >= ? ORDER BY block'
-    );
+      // wei 가 TEXT 인 이유: SQLite 의 INTEGER 는 부호 있는 64비트라 최대 약 9.2e18 이다.
+      // 1 ETH = 1e18 wei 이므로 9 ETH 만 넘어도 넘친다. config.json 의 WETH 컨트랙트는
+      // 수백만 ETH(약 1e24 wei)를 들고 있어 INTEGER 로는 확실히 깨진다. INTEGER 로 바꾸면
+      // 2841337000000000000000000 이 2.841337e+24 라는 부동소수점이 되어 돌아온다.
+      // 서버가 BigInt 로 계산해 10진 문자열로 넘기는 것과 같은 이유다.
+      //
+      // (address, block) 을 기본키로 두면 같은 블록을 두 번 처리해도 행이 늘지 않는다.
+      // server.js 의 forceRefresh 가 리로드 직후 같은 블록을 다시 읽으므로 실제로 생긴다.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS balances (
+          address TEXT    NOT NULL,
+          block   INTEGER NOT NULL,
+          ts      INTEGER NOT NULL,
+          wei     TEXT    NOT NULL,
+          PRIMARY KEY (address, block)
+        ) WITHOUT ROWID
+      `);
 
-    // MAX() 를 쓴 집계 질의에서 나머지 컬럼은 그 최댓값을 낸 행의 값이 온다.
-    // SQLite 가 문서로 보장하는 동작이다.
-    this.stLatest = this.db.prepare(
-      'SELECT address, MAX(block) AS block, ts, wei FROM balances GROUP BY address'
-    );
+      this.stInsert = this.db.prepare(
+        'INSERT OR IGNORE INTO balances (address, block, ts, wei) VALUES (?, ?, ?, ?)'
+      );
+      this.stHistory = this.db.prepare(
+        'SELECT block, ts, wei FROM balances WHERE address = ? AND ts >= ? ORDER BY block'
+      );
+      // MAX() 를 쓴 집계 질의에서 나머지 컬럼은 그 최댓값을 낸 행의 값이 온다.
+      // SQLite 가 문서로 보장하는 동작이다.
+      this.stLatest = this.db.prepare(
+        'SELECT address, MAX(block) AS block, ts, wei FROM balances GROUP BY address'
+      );
+    } catch (err) {
+      // 저장소를 못 열어도 서버는 떠야 한다. 이 뒤의 append/history/latest 는
+      // 준비되지 않은 statement 를 만나 각자의 catch 로 떨어진다.
+      this.error = err.message;
+      this.db = null;
+    }
   }
 
   // 이미 있는 (address, block) 은 조용히 무시된다.
   //
-  // 어떤 이유로든 던지지 않는다. 이 대시보드의 본업은 잔액을 보여주는 것이지
-  // 기록을 남기는 것이 아니다. 디스크가 차서 저장이 안 된다고 폴링 루프까지
+  // 어떤 이유로든 던지지 않는다. 디스크가 차서 저장이 안 된다고 폴링 루프까지
   // 멈추면, 고장 하나가 고장 둘이 된다.
   append(records) {
     try {
@@ -96,7 +106,11 @@ class Store {
   }
 
   close() {
-    this.db.close();
+    try {
+      if (this.db) this.db.close();
+    } catch (err) {
+      this.error = err.message;
+    }
   }
 }
 

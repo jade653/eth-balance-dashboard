@@ -6,9 +6,16 @@
 
 ## 실행
 
+`node:sqlite` 를 쓰므로 Node 22 이상이 필요하다(`package.json` engines). nvm 을 쓴다면
+이 디렉터리에서 `.nvmrc` 가 버전을 잡아 준다.
+
 ```bash
+nvm use          # .nvmrc -> 24
 node server.js
 ```
+
+이 서버의 계정 기본 Node 는 20 이라 `nvm use` 없이 `./deploy.sh` 를 돌리면
+버전 게이트에 걸려 중단된다. 계정이 공용이라 `nvm alias default` 는 바꾸지 않는다.
 
 http://localhost:8787
 
