@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --bg: #ffffff;
+  --panel: #f6f8fa;
+  --line: #d1d9e0;
+  --link: #0969da;
+  --ok: #1a7f37;
+  --bad: #cf222e;
+  --warn: #9a6700;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6edf3; --muted: #9198a1; --bg: #0d1117; --panel: #151b23;
+    --line: #3d444d; --link: #4493f8; --ok: #3fb950; --bad: #f85149; --warn: #d29922;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 960px; padding: 16px; color: var(--fg); background: var(--bg); }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1rem; }
+.brand { font-size: 1.25rem; font-weight: 700; color: var(--fg); }
+.status { font-size: .85rem; color: var(--muted); }
+.status[data-state="ok"]::before { content: "● "; color: var(--ok); }
+.status[data-state="error"]::before { content: "● "; color: var(--bad); }
+
+form { display: flex; gap: .5rem; }
+input[type="search"] {
+  flex: 1; min-width: 0; padding: .6rem .75rem; font: inherit; font-family: ui-monospace, monospace;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg);
+}
+button { padding: .6rem 1rem; font: inherit; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); cursor: pointer; }
+
+.error { color: var(--bad); }
+.muted { color: var(--muted); }
+
+main { margin-top: 1.5rem; }
+h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+
+dl.kv {
+  display: grid; grid-template-columns: minmax(7rem, max-content) 1fr; gap: .55rem 1.25rem;
+  margin: 0; padding: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+}
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, monospace; font-size: .9em; }
+
+.badge { display: inline-block; padding: 0 .5rem; border-radius: 999px; font-size: .85em; border: 1px solid currentColor; }
+.badge.success { color: var(--ok); }
+.badge.failed { color: var(--bad); }
+.badge.pending { color: var(--warn); }
+
+ul.txs { list-style: none; padding: 0; margin: .75rem 0 0; columns: 2 22rem; }
+ul.txs li { padding: .2rem 0; }
+
+@media (max-width: 560px) {
+  dl.kv { grid-template-columns: 1fr; gap: .15rem; }
+  dl.kv dd { margin-bottom: .5rem; }
+}

@@ -27,6 +27,19 @@ export function weiToEth(wei, maxFraction = 6) {
   return frac ? `${formatInteger(whole.toString())}.${frac}` : formatInteger(whole.toString());
 }
 
+/**
+ * 검색창 입력이 무엇인지 판별해 이동할 화면 경로를 돌려준다. 모르면 null.
+ *   0x + 64자리 → tx,  0x + 40자리 → 주소,  숫자 → 블록
+ */
+export function routeForQuery(raw) {
+  const q = String(raw ?? '').trim().replace(/,/g, '');
+  if (/^0x[0-9a-fA-F]{64}$/.test(q)) return `#/tx/${q}`;
+  if (/^0x[0-9a-fA-F]{40}$/.test(q)) return `#/address/${q}`;
+  if (/^\d+$/.test(q)) return `#/block/${BigInt(q).toString()}`;
+  if (q.toLowerCase() === 'latest') return '#/block/latest';
+  return null;
+}
+
 /** 0x1234…cdef 처럼 앞뒤만 남긴다. 해시·주소 공용. */
 export function shortHex(hex, keep = 6) {
   if (typeof hex !== 'string' || !hex.startsWith('0x')) return String(hex);

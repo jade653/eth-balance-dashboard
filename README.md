@@ -10,7 +10,8 @@ GitHub CI/CD** 를 갖춘 작은 이더리움 explorer 로 다시 짜는 실습 
 ├── server/                 API 서버 (Node 24, 의존성 0)
 │   ├── src/
 │   │   ├── index.js        진입점: 환경변수 읽고 포트 연다 (조립만)
-│   │   ├── app.js          라우팅·응답 (rpc 를 주입받아 테스트 가능)
+│   │   ├── app.js          HTTP 층: URL·메서드·상태코드 (rpc 를 주입받아 테스트 가능)
+│   │   ├── explorer.js     업무 층: tx·블록·주소를 보여주려면 노드에 무엇을 묻나
 │   │   ├── rpc.js          JSON-RPC 클라이언트 (legacy 에서 이식, 페일오버·배치)
 │   │   └── validate.js     입력 검증 (주소, tx 해시)
 │   └── test/
@@ -54,15 +55,31 @@ cd legacy && npm test
 
 ## API
 
+모든 숫자(블록 번호, wei, 가스)는 **10진수 문자열**로 준다. 에러 본문은 항상 `{"error":"<코드>"}`.
+
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/v1/health` | 서버·RPC 상태. RPC 에 못 닿으면 503 |
+| GET | `/api/v1/health` | 서버·RPC 상태 |
+| GET | `/api/v1/txs/{hash}` | tx 상세: 성공/실패, 보낸·받는 주소, 금액, 수수료, 블록·시각 |
+| GET | `/api/v1/blocks/{number\|latest}` | 블록 상세 + 포함된 tx 해시 목록 |
+| GET | `/api/v1/addresses/{address}` | 잔액, nonce, EOA/컨트랙트 구분 |
+
+| 상태코드 | 뜻 |
+|---|---|
+| 200 | 찾음 |
+| 400 | 형식이 틀림 (`invalid_tx_hash` 등) — 노드에 묻지도 않는다 |
+| 404 | 형식은 맞는데 없음 (`not_found`) |
+| 405 | 경로는 있는데 메서드가 틀림 (`Allow` 헤더 포함) |
+| 503 | 노드(RPC)에 못 닿음 (`rpc_unavailable`) |
+| 500 | 서버 코드 버그 (`internal_error`) |
+
+주소별 tx 목록은 JSON-RPC 에 없는 기능이라 인덱서(DB) 단계에서 추가한다.
 
 ## 진행 단계
 
 1. ✅ 폴더 분리 (client / server / legacy)
 2. ✅ CI — PR·push 마다 세 패키지 테스트
-3. ⬜ REST API 설계 (tx 조회, 블록 조회, 주소)
+3. ✅ REST API — tx · 블록 · 주소 조회 + 검색 화면
 4. ⬜ Docker 화 + nginx (정적 서빙 + /api 프록시)
 5. ⬜ 다중 인스턴스 (worker / API 분리, DB 결정 — 추적 날짜 범위 포함)
 6. ⬜ CD — 이미지 빌드·푸시·배포

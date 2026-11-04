@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatInteger, weiToEth, shortHex } from '../public/js/format.js';
+import { formatInteger, weiToEth, shortHex, routeForQuery } from '../public/js/format.js';
+
+test('routeForQuery: 입력 모양으로 화면을 고른다', () => {
+  const tx = '0x' + 'ab'.repeat(32);
+  const addr = '0x' + 'cd'.repeat(20);
+  assert.equal(routeForQuery(` ${tx} `), `#/tx/${tx}`);
+  assert.equal(routeForQuery(addr), `#/address/${addr}`);
+  assert.equal(routeForQuery('23,272,543'), '#/block/23272543');
+  assert.equal(routeForQuery('007'), '#/block/7');
+  assert.equal(routeForQuery('latest'), '#/block/latest');
+  for (const bad of ['', 'hello', '0x1234', '-1', null]) assert.equal(routeForQuery(bad), null, String(bad));
+});
 
 test('formatInteger: 세 자리마다 쉼표', () => {
   assert.equal(formatInteger('0'), '0');
