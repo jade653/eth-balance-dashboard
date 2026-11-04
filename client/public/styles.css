@@ -55,6 +55,16 @@ dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeri
 .badge.failed { color: var(--bad); }
 .badge.pending { color: var(--warn); }
 
+h3 { font-size: 1rem; margin: 1.75rem 0 .25rem; }
+.table-wrap { overflow-x: auto; margin: .75rem 0; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: .85em; }
+.num { text-align: right; }
+.badge.in { color: var(--ok); }
+.badge.out { color: var(--warn); }
+.badge.self { color: var(--muted); }
+
 ul.txs { list-style: none; padding: 0; margin: .75rem 0 0; columns: 2 22rem; }
 ul.txs li { padding: .2rem 0; }
 

@@ -2,24 +2,73 @@
 #
 #   docker compose up -d --build          # 빌드하고 띄우기
 #   docker compose up -d --scale api=5    # api 를 5개로
+#   docker compose logs -f worker         # 인덱서 진행 상황
 #   docker compose logs -f web            # nginx 로그 (어느 api 가 받았는지 보인다)
-#   docker compose down                   # 내리기
+#   docker compose down                   # 내리기 (DB 데이터는 볼륨에 남는다)
+#   docker compose down -v                # 내리고 DB 데이터까지 삭제
 #
-#   [브라우저] ──:8080──▶ [web: nginx] ──▶ [api × 3]  ──▶ 이더리움 RPC
-#                         밖에 열린 건        밖에서는
-#                         이것 하나           안 보인다
+#   [브라우저] ──:8080──▶ [web: nginx] ──▶ [api × 3] ──┬──▶ 이더리움 RPC   (tx·블록·주소 조회)
+#                                                      └──▶ [db: Postgres] (주소별 tx 목록, 읽기)
+#                                                                ▲
+#                          [worker × 1] ── 블록을 받아 쌓기 ─────┘ (쓰기)
+#                               └──────────▶ 이더리움 RPC
+
+x-db-url: &db-url postgres://explorer:${POSTGRES_PASSWORD:-explorer}@db:5432/explorer
 
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: explorer
+      POSTGRES_DB: explorer
+      # 로컬 기본값. 실제 서버에서는 .env 에 POSTGRES_PASSWORD 를 꼭 바꿔 둘 것 (커밋 금지).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-explorer}
+    volumes:
+      # 컨테이너를 지우고 다시 만들어도 데이터는 이 볼륨에 남는다
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "explorer", "-d", "explorer"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    # ports 가 없다 = DB 는 컨테이너끼리만 보인다. 밖에서 직접 접속할 수 없다.
+
+  worker:
+    build: ./server
+    image: eth-explorer-api:local
+    # api 와 같은 이미지, 다른 실행 명령. "같은 코드베이스, 다른 역할"
+    command: ["node", "src/worker.js"]
+    environment:
+      RPC_HTTP_URL: ${RPC_HTTP_URL:-https://ethereum-rpc.publicnode.com}
+      DATABASE_URL: *db-url
+      RETENTION_HOURS: ${RETENTION_HOURS:-24}
+    # 반드시 1개. 둘이면 같은 블록을 두 번 받고 리오그 되감기가 서로 꼬인다.
+    deploy:
+      replicas: 1
+    # 이미지의 HEALTHCHECK 는 api 용(8787 포트)이다. worker 는 HTTP 를 열지 않으므로 끈다.
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   api:
     build: ./server
     image: eth-explorer-api:local
     environment:
       # .env 파일이나 셸 환경변수로 덮어쓸 수 있다. API 키가 든 URL 은 커밋하지 말고 .env 에.
       RPC_HTTP_URL: ${RPC_HTTP_URL:-https://ethereum-rpc.publicnode.com}
-    # 같은 이미지로 컨테이너 3개. 지금 API 는 상태(메모리·DB)가 없어서 몇 개를 띄워도
-    # 어느 인스턴스가 받든 같은 답을 한다 — 그래서 아무 준비 없이 늘릴 수 있다.
+      DATABASE_URL: *db-url
+    # 같은 이미지로 컨테이너 3개. api 는 DB 를 "읽기만" 하고 자기 안에 상태를 두지 않으므로
+    # 몇 개를 띄워도 어느 인스턴스가 받든 같은 답을 한다.
+    # 주의: 인스턴스마다 DB 연결을 최대 5개 연다 (db.js). 늘리면 DB 연결 수도 같이 는다.
     deploy:
       replicas: 3
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     # ports 가 없다 = 호스트 밖에서 직접 접근 불가. nginx 를 통해서만 들어온다.
 
@@ -34,3 +83,6 @@ services:
       api:
         condition: service_healthy     # api 가 대답할 수 있게 된 뒤에 nginx 를 띄운다
     restart: unless-stopped
+
+volumes:
+  pgdata:

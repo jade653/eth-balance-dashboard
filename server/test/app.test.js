@@ -27,17 +27,25 @@ const fakeRpc = {
   },
 };
 
+// 가짜 DB. 테스트마다 함수를 바꿔 끼운다.
+let store = {};
+const fakeStore = {
+  latestBlock: (...a) => store.latestBlock(...a),
+  coverage: (...a) => (store.coverage ?? (async () => null))(...a),
+  listAddressTxs: (...a) => store.listAddressTxs(...a),
+};
+
 let server;
 let base;
 const get = (path, init) => fetch(`${base}${path}`, init);
 
 before(async () => {
-  server = http.createServer(createApp({ rpc: fakeRpc }));
+  server = http.createServer(createApp({ rpc: fakeRpc, store: fakeStore }));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => server.close());
-beforeEach(() => { node = {}; });
+beforeEach(() => { node = {}; store = {}; });
 
 /* ── health ─────────────────────────────────────────────────────────────── */
 
@@ -45,7 +53,18 @@ test('GET /api/v1/health → 200', async () => {
   node = { eth_chainId: () => '0x1', eth_blockNumber: () => '0x1631c5f' };
   const res = await get('/api/v1/health');
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true, chainId: 1, block: '23272543' });
+  assert.deepEqual(await res.json(), { ok: true, chainId: 1, block: '23272543', indexer: null });
+});
+
+test('health 에 인덱서 범위와 지연(lag)이 붙는다. DB 가 죽어도 health 는 200', async () => {
+  node = { eth_chainId: () => '0x1', eth_blockNumber: () => '0x64' }; // 100
+  store.coverage = async () => ({ fromBlock: '1', toBlock: '97', fromTime: 'a', toTime: 'b' });
+  assert.equal((await (await get('/api/v1/health')).json()).indexer.lag, '3');
+
+  store.coverage = async () => { throw new Error('ECONNREFUSED'); };
+  const res = await get('/api/v1/health');
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).indexer, null);
 });
 
 test('RPC 가 죽으면 503, 에러 원문(API 키)은 숨긴다', async () => {
@@ -179,6 +198,48 @@ test('GET /addresses/{address} → 잔액·nonce·EOA/컨트랙트 구분', asyn
 
 test('형식이 틀린 주소 → 400', async () => {
   assert.equal((await get('/api/v1/addresses/0x1234')).status, 400);
+});
+
+/* ── addresses/{address}/txs (DB) ───────────────────────────────────────── */
+
+test('GET /addresses/{a}/txs → DB 결과 + 커버리지, 쿼리 파라미터 해석', async () => {
+  let seen;
+  store.listAddressTxs = async (addr, opts) => {
+    seen = { addr, opts };
+    return { items: [{ hash: TX }], nextCursor: '16-0' };
+  };
+  store.coverage = async () => ({ fromBlock: '10', toBlock: '20', fromTime: 'x', toTime: 'y' });
+
+  const res = await get(`/api/v1/addresses/${ADDR}/txs?limit=10&cursor=17-3`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, { addr: ADDR, opts: { limit: 10, before: ['17', 3] } });
+  const body = await res.json();
+  assert.equal(body.nextCursor, '16-0');
+  assert.equal(body.coverage.toBlock, '20');
+
+  await get(`/api/v1/addresses/${ADDR}/txs`);
+  assert.deepEqual(seen.opts, { limit: 25, before: undefined }); // 기본값
+});
+
+test('목록 파라미터가 틀리면 400 (DB 에 묻지 않는다)', async () => {
+  store.listAddressTxs = async () => { throw new Error('호출되면 안 됨'); };
+  for (const [q, code] of [
+    ['limit=0', 'invalid_limit'], ['limit=101', 'invalid_limit'], ['limit=abc', 'invalid_limit'],
+    ['cursor=abc', 'invalid_cursor'], ['cursor=1-', 'invalid_cursor'], ["cursor=1-1'", 'invalid_cursor'],
+  ]) {
+    const res = await get(`/api/v1/addresses/${ADDR}/txs?${q}`);
+    assert.equal(res.status, 400, q);
+    assert.equal((await res.json()).error, code, q);
+  }
+  assert.equal((await get('/api/v1/addresses/0x12/txs')).status, 400);
+});
+
+test('DB 가 죽으면 503 db_unavailable (RPC 장애와 구분된다)', async () => {
+  store.listAddressTxs = async () => { throw new Error('connect ECONNREFUSED 10.0.0.5:5432'); };
+  store.coverage = async () => null;
+  const res = await get(`/api/v1/addresses/${ADDR}/txs`);
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: 'db_unavailable' });
 });
 
 /* ── 공통 ───────────────────────────────────────────────────────────────── */

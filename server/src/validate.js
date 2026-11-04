@@ -29,3 +29,17 @@ export function isAddress(v) {
 export function isTxHash(v) {
   return typeof v === 'string' && TX_HASH_RE.test(v);
 }
+
+// 목록 API 의 페이지 크기. 없으면 25, 1~100 만 허용.
+export function parseLimit(v) {
+  if (v === null || v === undefined) return 25;
+  if (!/^\d{1,3}$/.test(v)) return null;
+  const n = Number(v);
+  return n >= 1 && n <= 100 ? n : null;
+}
+
+// 페이지 커서 "<블록번호>-<블록 안 순서>" (응답의 nextCursor 를 그대로 돌려받는다). 틀리면 null.
+export function parseCursor(v) {
+  const m = typeof v === 'string' && /^(0|[1-9]\d{0,14})-(0|[1-9]\d{0,5})$/.exec(v);
+  return m ? [m[1], Number(m[2])] : null;
+}
