@@ -7,8 +7,7 @@
 # 무엇을 하나
 #   1) test   : server / client / legacy 테스트를 패키지별로 동시에 돌린다
 #   2) docker : 1 이 통과하면 이미지를 빌드해 띄우고 smoke test (nginx → api → DB, 로드밸런싱)
-#
-# 아직 안 하는 것: 서버에 배포 (CD) → 마지막 단계
+#   3) release: main 에 push 된 것이 1·2 를 통과하면 이미지를 GHCR 에 올린다 (서버가 받아 감)
 
 name: CI
 
@@ -104,3 +103,45 @@ jobs:
       - name: 정리
         if: always()
         run: docker compose down
+
+  # CD 의 "GitHub 쪽 절반": main 에 들어온 코드가 test·docker 를 모두 통과하면
+  # 이미지를 GHCR(GitHub 의 이미지 저장소)에 올린다. 서버는 여기서 받아 간다 (deploy/update.sh).
+  # GitHub 은 서버를 모른다 — 서버 주소·SSH 키 같은 비밀값이 필요 없다.
+  release:
+    name: release (GHCR 에 이미지 올리기)
+    needs: [test, docker]
+    # PR 에서는 돌지 않는다. main 에 들어간 것만 배포 대상이다.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write          # GHCR 에 올릴 권한은 이 job 에만 준다
+
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: GHCR 로그인
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # GitHub 이 job 마다 자동으로 주는 임시 토큰
+
+      - name: 이미지 빌드 + 올리기 (태그 main, sha-xxxxxxx)
+        run: |
+          set -euo pipefail
+          sha=sha-${GITHUB_SHA::7}
+          for name in api web; do
+            dir=$([ "$name" = api ] && echo server || echo client)
+            img=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/eth-explorer-$name
+            # source 라벨: 이 이미지가 어느 저장소에서 왔는지 GHCR 에 알려 준다 (저장소와 연결됨)
+            docker build "$dir" \
+              --label org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY} \
+              --label org.opencontainers.image.revision=${GITHUB_SHA} \
+              -t "$img:main" -t "$img:$sha"
+            docker push "$img:main"
+            docker push "$img:$sha"
+            echo "pushed $img:{main,$sha}" >> "$GITHUB_STEP_SUMMARY"
+          done

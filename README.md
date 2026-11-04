@@ -32,7 +32,8 @@ GitHub CI/CD** 를 갖춘 작은 이더리움 explorer 로 다시 짜는 실습 
 │   └── Dockerfile          web 이미지 (nginx + public/)
 ├── legacy/                 기존 잔액 대시보드. 새 버전이 대체할 때까지 그대로 둔다
 ├── compose.yaml            전체 구성: web(nginx) 1 + api 3 + worker 1 + db(Postgres) 1
-├── scripts/smoke.sh        띄운 서비스를 바깥에서 점검 (CI 도 사용)
+├── scripts/smoke.sh        띄운 서비스를 바깥에서 점검 (CI·배포 스크립트도 사용)
+├── deploy/                 서버 배포: update.sh (cron), compose.prod.yaml, 설정 안내
 ├── .github/workflows/ci.yml
 └── .nvmrc                  Node 버전 (로컬 nvm 과 CI 가 같이 본다)
 ```
@@ -129,4 +130,4 @@ cd server && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:5432/postgres 
 3. ✅ REST API — tx · 블록 · 주소 조회 + 검색 화면
 4. ✅ Docker + nginx — web 1 + api 3, 로드밸런싱, CI 에서 이미지 빌드·smoke test
 5. ✅ 인덱서 — worker / api 분리, Postgres, 최근 24시간 보관, 주소별 tx 목록
-6. ⬜ CD — 이미지 빌드·푸시·배포
+6. ✅ CD — CI 통과 시 GHCR 에 이미지, 서버 cron 이 받아 교체 (pull 방식, GitHub 에 서버 정보 없음) → [deploy/README.md](deploy/README.md)
