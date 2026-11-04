@@ -1,0 +1,14 @@
+{
+  "name": "eth-explorer-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static frontend - 빌드 없이 public/ 을 그대로 서빙한다",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

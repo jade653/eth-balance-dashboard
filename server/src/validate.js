@@ -1,0 +1,23 @@
+/**
+ * 신뢰할 수 없는 입력이 통과해야 하는 첫 관문.
+ *
+ * legacy/validate.js 에서 가져왔다. explorer 는 주소 외에 tx 해시도 받으므로
+ * isTxHash 를 더했다. (조회 범위 화이트리스트는 DB 를 붙일 때 다시 정한다)
+ *
+ * 형식 검사는 "보안"이기도 하다. 정규식을 통과한 값은 16진수 문자만 담고 있어
+ * SQL·HTML·URL 어디에 들어가도 특수문자로 해석될 여지가 없다.
+ */
+
+// EIP-55 체크섬까지는 보지 않는다. 대소문자 혼용 주소를 그대로 받는다.
+export const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+// tx 해시는 keccak256 결과 32바이트 = 16진수 64자리.
+export const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
+export function isAddress(v) {
+  return typeof v === 'string' && ADDRESS_RE.test(v);
+}
+
+export function isTxHash(v) {
+  return typeof v === 'string' && TX_HASH_RE.test(v);
+}
