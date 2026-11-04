@@ -5,12 +5,10 @@
 #   - PR 이 열리거나 커밋이 추가될 때 (PR 화면에 체크 표시로 나온다)
 #
 # 무엇을 하나
-#   server / client / legacy 세 패키지의 테스트를 "각각 별도 job" 으로 동시에 돌린다.
-#   하나가 깨져도 나머지는 끝까지 돌아서, 어디가 깨졌는지 한 번에 보인다.
+#   1) test   : server / client / legacy 테스트를 패키지별로 동시에 돌린다
+#   2) docker : 1 이 통과하면 이미지를 빌드해 띄우고 smoke test (nginx → api, 로드밸런싱)
 #
-# 아직 안 하는 것 (다음 단계들에서 붙인다)
-#   - Docker 이미지 빌드  → Docker 화 단계
-#   - 서버에 배포 (CD)    → 마지막 단계
+# 아직 안 하는 것: 서버에 배포 (CD) → 마지막 단계
 
 name: CI
 
@@ -59,3 +57,30 @@ jobs:
 
       - name: 테스트
         run: npm test
+
+  # 이미지가 실제로 빌드되고, 띄웠을 때 nginx → api 연결과 로드밸런싱이 되는지 확인한다.
+  # 코드 테스트가 통과해야 의미가 있으므로 test job 들이 끝난 뒤에 돈다 (needs).
+  docker:
+    name: docker (build + smoke)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: 이미지 빌드 + 컨테이너 띄우기
+        # --wait: 모든 컨테이너가 healthy 가 될 때까지 기다린다
+        run: docker compose up -d --build --wait --wait-timeout 60
+
+      - name: smoke test
+        run: ./scripts/smoke.sh
+
+      - name: 실패 시 컨테이너 로그
+        if: failure()
+        run: docker compose logs
+
+      - name: 정리
+        if: always()
+        run: docker compose down

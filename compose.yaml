@@ -1,0 +1,36 @@
+# 전체 서비스 구성. "어떤 컨테이너를 몇 개, 어떻게 연결해서 띄우나"를 한 파일에 적는다.
+#
+#   docker compose up -d --build          # 빌드하고 띄우기
+#   docker compose up -d --scale api=5    # api 를 5개로
+#   docker compose logs -f web            # nginx 로그 (어느 api 가 받았는지 보인다)
+#   docker compose down                   # 내리기
+#
+#   [브라우저] ──:8080──▶ [web: nginx] ──▶ [api × 3]  ──▶ 이더리움 RPC
+#                         밖에 열린 건        밖에서는
+#                         이것 하나           안 보인다
+
+services:
+  api:
+    build: ./server
+    image: eth-explorer-api:local
+    environment:
+      # .env 파일이나 셸 환경변수로 덮어쓸 수 있다. API 키가 든 URL 은 커밋하지 말고 .env 에.
+      RPC_HTTP_URL: ${RPC_HTTP_URL:-https://ethereum-rpc.publicnode.com}
+    # 같은 이미지로 컨테이너 3개. 지금 API 는 상태(메모리·DB)가 없어서 몇 개를 띄워도
+    # 어느 인스턴스가 받든 같은 답을 한다 — 그래서 아무 준비 없이 늘릴 수 있다.
+    deploy:
+      replicas: 3
+    restart: unless-stopped
+    # ports 가 없다 = 호스트 밖에서 직접 접근 불가. nginx 를 통해서만 들어온다.
+
+  web:
+    build: ./client
+    image: eth-explorer-web:local
+    ports:
+      # 127.0.0.1 에만 연다. 이 서버의 80/443 은 기존 관문(Traefik/nginx)이 쓰고 있으므로
+      # 관문이 이 포트로 넘겨주는 구성으로 간다. 개인 서버라면 "80:80" 으로 바꿔도 된다.
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy     # api 가 대답할 수 있게 된 뒤에 nginx 를 띄운다
+    restart: unless-stopped

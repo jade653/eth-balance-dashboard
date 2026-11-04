@@ -1,0 +1,6 @@
+# 이미지에는 public/ 과 nginx/ 만 들어간다. 나머지는 빌드 컨텍스트에서도 뺀다.
+node_modules
+test
+scripts
+package.json
+*.log
