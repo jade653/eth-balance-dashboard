@@ -14,21 +14,43 @@ GitHub CI/CD** 를 갖춘 작은 이더리움 explorer 로 다시 짜는 실습 
 │   │   ├── explorer.js     업무 층: tx·블록·주소를 보여주려면 노드에 무엇을 묻나
 │   │   ├── rpc.js          JSON-RPC 클라이언트 (legacy 에서 이식, 페일오버·배치)
 │   │   └── validate.js     입력 검증 (주소, tx 해시)
-│   └── test/
+│   ├── test/
+│   └── Dockerfile          api 이미지 (node:24-alpine)
 ├── client/                 정적 프론트엔드 (빌드 없음)
 │   ├── public/             배포 시 nginx 가 그대로 서빙할 파일들
 │   │   ├── index.html
 │   │   └── js/
 │   │       ├── main.js     DOM·fetch
 │   │       └── format.js   표시용 순수 함수 (Node 로 테스트)
-│   ├── scripts/dev.js      개발용 서버: 정적 파일 + /api 프록시 (= 나중의 nginx 역할)
-│   └── test/
+│   ├── nginx/default.conf  nginx 설정: 정적 서빙 + /api 로드밸런싱
+│   ├── scripts/dev.js      개발용 서버: 정적 파일 + /api 프록시 (nginx 없이 개발할 때)
+│   ├── test/
+│   └── Dockerfile          web 이미지 (nginx + public/)
 ├── legacy/                 기존 잔액 대시보드. 새 버전이 대체할 때까지 그대로 둔다
+├── compose.yaml            전체 구성: web(nginx) 1개 + api 3개
+├── scripts/smoke.sh        띄운 서비스를 바깥에서 점검 (CI 도 사용)
 ├── .github/workflows/ci.yml
 └── .nvmrc                  Node 버전 (로컬 nvm 과 CI 가 같이 본다)
 ```
 
-## 로컬 실행
+## Docker 로 실행 (배포와 같은 모양)
+
+```
+[브라우저] ──:8080──▶ [web: nginx] ─┬─▶ 정적 파일
+                                    └─▶ /api/* → [api × 3] ──▶ 이더리움 RPC
+```
+
+```bash
+docker compose up -d --build           # http://127.0.0.1:8080
+./scripts/smoke.sh                     # 정적 서빙 · /api 프록시 · 로드밸런싱 점검
+docker compose up -d --scale api=5     # api 를 5개로
+docker compose logs -f web             # 어느 api 가 받았는지(upstream=) 보인다
+docker compose down
+```
+
+RPC 를 바꾸려면 `.env` 에 `RPC_HTTP_URL=...` (커밋하지 않는다). 포트는 `WEB_PORT` 로 바꾼다.
+
+## Docker 없이 실행 (개발용)
 
 ```bash
 nvm use                         # .nvmrc -> 24
@@ -80,6 +102,6 @@ cd legacy && npm test
 1. ✅ 폴더 분리 (client / server / legacy)
 2. ✅ CI — PR·push 마다 세 패키지 테스트
 3. ✅ REST API — tx · 블록 · 주소 조회 + 검색 화면
-4. ⬜ Docker 화 + nginx (정적 서빙 + /api 프록시)
+4. ✅ Docker + nginx — web 1 + api 3, 로드밸런싱, CI 에서 이미지 빌드·smoke test
 5. ⬜ 다중 인스턴스 (worker / API 분리, DB 결정 — 추적 날짜 범위 포함)
 6. ⬜ CD — 이미지 빌드·푸시·배포

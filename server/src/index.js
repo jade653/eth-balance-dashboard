@@ -3,6 +3,7 @@
  * "조립"만 하고 로직은 없다 — 로직은 전부 테스트 가능한 app.js 쪽에 있다.
  */
 import http from 'node:http';
+import os from 'node:os';
 import { createApp } from './app.js';
 import { RpcClient } from './rpc.js';
 
@@ -16,7 +17,15 @@ const RPC_URLS = (process.env.RPC_HTTP_URL ?? 'https://ethereum-rpc.publicnode.c
   .filter(Boolean);
 
 const rpc = new RpcClient(RPC_URLS);
-const server = http.createServer(createApp({ rpc }));
+const app = createApp({ rpc });
+
+// 컨테이너 안에서 hostname 은 컨테이너 ID 다. 응답마다 붙여 두면
+// nginx 가 요청을 여러 인스턴스에 나눠 주는 모습을 헤더로 직접 볼 수 있다.
+const INSTANCE = os.hostname();
+const server = http.createServer((req, res) => {
+  res.setHeader('x-served-by', INSTANCE);
+  app(req, res);
+});
 
 server.listen(PORT, HOST, () => {
   // URL 자체는 로그에 남기지 않는다. API 키가 들어 있을 수 있다.
