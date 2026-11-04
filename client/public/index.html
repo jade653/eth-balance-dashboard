@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ETH Explorer</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 720px; margin: 2rem auto; padding: 0 16px; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: .5rem 1rem; }
+    dt { opacity: .7; }
+    dd { margin: 0; font-variant-numeric: tabular-nums; }
+    [data-state="ok"] { color: #1a7f37; }
+    [data-state="error"] { color: #cf222e; }
+  </style>
+</head>
+<body>
+  <h1>ETH Explorer</h1>
+  <dl>
+    <dt>서버</dt><dd id="status">확인 중…</dd>
+    <dt>chainId</dt><dd id="chain">-</dd>
+    <dt>최신 블록</dt><dd id="block">-</dd>
+  </dl>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

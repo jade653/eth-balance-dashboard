@@ -1,0 +1,61 @@
+# CI: 코드가 올라올 때마다 "테스트가 통과하는가"를 GitHub 서버에서 확인한다.
+#
+# 언제 도나
+#   - main 에 push 될 때
+#   - PR 이 열리거나 커밋이 추가될 때 (PR 화면에 체크 표시로 나온다)
+#
+# 무엇을 하나
+#   server / client / legacy 세 패키지의 테스트를 "각각 별도 job" 으로 동시에 돌린다.
+#   하나가 깨져도 나머지는 끝까지 돌아서, 어디가 깨졌는지 한 번에 보인다.
+#
+# 아직 안 하는 것 (다음 단계들에서 붙인다)
+#   - Docker 이미지 빌드  → Docker 화 단계
+#   - 서버에 배포 (CD)    → 마지막 단계
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 같은 브랜치에 연달아 push 하면 이전 실행은 의미가 없으므로 취소한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 이 워크플로가 가진 GitHub 토큰 권한을 "코드 읽기"로 최소화한다.
+# 테스트만 돌리는 job 이 저장소에 쓸 권한을 가질 이유가 없다.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false            # 하나가 실패해도 다른 패키지 테스트는 계속
+      matrix:
+        package: [server, client, legacy]
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Node 설치 (.nvmrc 의 버전)
+        uses: actions/setup-node@v4
+        with:
+          # 로컬(nvm use)과 CI 가 같은 버전을 쓰도록 버전을 한 파일에서만 관리한다.
+          node-version-file: .nvmrc
+
+      # 지금은 세 패키지 모두 외부 의존성이 0개라 npm ci 단계가 없다.
+      # 의존성이 생기면 package-lock.json 을 커밋하고 여기에 `npm ci` 를 추가한다.
+
+      - name: 테스트
+        run: npm test

@@ -1,0 +1,15 @@
+{
+  "name": "eth-explorer-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API server - JSON-RPC 를 감싼 REST API",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
