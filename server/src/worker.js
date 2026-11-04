@@ -10,6 +10,7 @@
  *   2. 블록을 따라가며 DB 에 쌓기 (syncOnce 반복)
  *   3. 1시간마다 보관 기간이 지난 블록 지우기 (prune)
  */
+import fs from 'node:fs';
 import { RpcClient } from './rpc.js';
 import { createPool, createStore, migrate } from './db.js';
 import { syncOnce } from './indexer.js';
@@ -44,6 +45,18 @@ const sleep = (ms) =>
     stop.signal.addEventListener('abort', wake, { once: true });
   });
 
+// 살아 있다는 표시. 루프가 한 바퀴 돌 때마다 이 파일의 수정 시각을 갱신한다.
+// worker 는 HTTP 를 열지 않으므로, 컨테이너 healthcheck 는 "이 파일이 최근에 갱신됐나"를 본다.
+// 프로세스는 살아 있는데 어딘가에 멈춰 버린(hang) 경우도 이걸로 잡힌다.
+const HEARTBEAT_FILE = process.env.HEARTBEAT_FILE ?? '/tmp/worker-heartbeat';
+const beat = () => {
+  try {
+    fs.writeFileSync(HEARTBEAT_FILE, String(Date.now()));
+  } catch {
+    /* 표시 실패가 인덱싱을 막으면 안 된다 */
+  }
+};
+
 const rpc = new RpcClient(RPC_URLS, { timeoutMs: 20_000 });
 const pool = createPool(DATABASE_URL, { max: 2 });
 const store = createStore(pool);
@@ -61,6 +74,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
 async function main() {
   // DB 가 막 뜨는 중일 수 있으므로 붙을 때까지 재시도
   for (let i = 1; ; i++) {
+    beat();
     try {
       await migrate(pool, log);
       break;
@@ -78,6 +92,7 @@ async function main() {
   let lastReport = Date.now();
 
   while (!stopping) {
+    beat();
     try {
       const r = await syncOnce(rpc, store, { retentionBlocks, batchSize: BATCH_SIZE, log });
       backoff = 1000;
