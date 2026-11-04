@@ -14,6 +14,14 @@ export const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 // tx 해시는 keccak256 결과 32바이트 = 16진수 64자리.
 export const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
+// 블록 번호: "latest" 또는 0 으로 시작하지 않는 10진수 (최대 15자리면 수천 년치다).
+// 16진수(0x..)는 받지 않는다 — API 바깥에는 10진수만 보인다는 규칙을 지킨다.
+export const BLOCK_ID_RE = /^(latest|0|[1-9]\d{0,14})$/;
+
+export function isBlockId(v) {
+  return typeof v === 'string' && BLOCK_ID_RE.test(v);
+}
+
 export function isAddress(v) {
   return typeof v === 'string' && ADDRESS_RE.test(v);
 }

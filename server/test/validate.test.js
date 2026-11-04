@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isAddress, isTxHash } from '../src/validate.js';
+import { isAddress, isTxHash, isBlockId } from '../src/validate.js';
+
+test('블록 id: latest 또는 앞자리 0 없는 10진수만', () => {
+  for (const ok of ['latest', '0', '1', '23272543', '9'.repeat(15)]) assert.equal(isBlockId(ok), true, ok);
+  for (const bad of ['', 'Latest', '0x10', '01', '-1', '1.0', '9'.repeat(16), null]) {
+    assert.equal(isBlockId(bad), false, String(bad));
+  }
+});
 
 const ADDR = '0x6d93f35603783fb9c1ac061b1349bed7a31386c4';
 const TX = '0x' + 'ab'.repeat(32);

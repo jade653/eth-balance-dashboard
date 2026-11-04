@@ -1,34 +1,174 @@
 /**
- * 화면 진입점. 지금은 서버 연결 확인(health)만 한다.
+ * 화면 진입점.
  *
- * API 주소를 "/api/v1/..." 처럼 상대경로로 쓴다. 브라우저 입장에서 화면과 API 가
- * 같은 출처(origin)에 있다는 뜻이고, 실제로 /api 를 서버로 넘겨주는 건 앞단의
- * 리버스 프록시 몫이다 (개발 중에는 scripts/dev.js, 배포 후에는 nginx).
- * 그래서 CORS 설정이 필요 없고, 클라이언트 코드는 서버가 어디 있는지 모른다.
+ * 화면 전환은 URL 의 # 뒤(해시)로 한다:  #/tx/0x…  #/block/123  #/address/0x…
+ * 해시가 바뀌어도 브라우저는 서버에 새 페이지를 요청하지 않는다. 그래서 서버(nginx)는
+ * 언제나 index.html 하나만 주면 되고, 주소창 링크를 공유·새로고침해도 같은 화면이 뜬다.
+ *
+ * API 는 상대경로(/api/v1/…)로 부른다. /api 를 서버로 넘기는 건 앞단 프록시의 일이다.
+ * 체인에서 온 값은 전부 textContent 로만 넣는다 (innerHTML 금지 → XSS 차단).
  */
-import { formatInteger } from './format.js';
+import { formatInteger, weiToEth, shortHex, routeForQuery } from './format.js';
 
-const el = {
-  status: document.getElementById('status'),
-  chain: document.getElementById('chain'),
-  block: document.getElementById('block'),
-};
+const $ = (id) => document.getElementById(id);
+const view = $('view');
 
-async function refresh() {
-  try {
-    const res = await fetch('/api/v1/health', { cache: 'no-store' });
-    const body = await res.json();
-    if (!res.ok || !body.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+/** 작은 DOM 생성 도우미. 문자열 자식은 텍스트 노드가 된다(HTML 로 해석되지 않는다). */
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue;
+    if (k === 'class') el.className = v;
+    else el.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null) continue;
+    el.append(c instanceof Node ? c : String(c));
+  }
+  return el;
+}
 
-    el.status.textContent = '연결됨';
-    el.status.dataset.state = 'ok';
-    el.chain.textContent = String(body.chainId);
-    el.block.textContent = formatInteger(body.block);
-  } catch (err) {
-    el.status.textContent = `연결 실패 (${err.message})`;
-    el.status.dataset.state = 'error';
+const link = (href, text, cls = 'mono') => h('a', { href, class: cls }, text);
+const addrLink = (a) => (a ? link(`#/address/${a}`, a) : h('span', { class: 'muted' }, '—'));
+const blockLink = (n) => link(`#/block/${n}`, formatInteger(n), '');
+const eth = (wei, digits = 18) => `${weiToEth(wei, digits)} ETH`;
+const gwei = (wei) => `${weiToEth(BigInt(wei) * 10n ** 9n, 4)} gwei`; // wei → gwei 표시
+
+/** 키-값 표. rows = [[라벨, 값], ...], 값이 undefined 인 행은 건너뛴다 */
+const kv = (rows) =>
+  h('dl', { class: 'kv' }, rows.filter(([, v]) => v !== undefined).flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]));
+
+/* ── API ───────────────────────────────────────────────────────────────── */
+
+class ApiError extends Error {
+  constructor(status, code) {
+    super(code);
+    this.status = status;
   }
 }
 
-refresh();
-setInterval(refresh, 12_000); // 이더리움 블록 간격
+async function api(path) {
+  const res = await fetch(`/api/v1${path}`, { cache: 'no-store' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, body.error ?? `http_${res.status}`);
+  return body;
+}
+
+/* ── 화면들 ─────────────────────────────────────────────────────────────── */
+
+async function txView(hash) {
+  const t = await api(`/txs/${hash}`);
+  const rows = [
+    ['tx 해시', h('span', { class: 'mono' }, t.hash)],
+    ['상태', h('span', { class: `badge ${t.status}` }, { success: '성공', failed: '실패', pending: '대기 중' }[t.status])],
+    ['블록', t.blockNumber ? blockLink(t.blockNumber) : undefined],
+    ['시각', t.timestamp ? new Date(t.timestamp).toLocaleString() : undefined],
+    ['보낸 주소', addrLink(t.from)],
+    ['받는 주소', t.to ? addrLink(t.to) : h('span', {}, '컨트랙트 생성 → ', addrLink(t.contractCreated))],
+    ['금액', eth(t.valueWei)],
+    ['수수료', t.feeWei ? eth(t.feeWei) : undefined],
+    ['가스', t.gasUsed ? `${formatInteger(t.gasUsed)} / ${formatInteger(t.gasLimit)}` : undefined],
+    ['가스 가격', t.gasPriceWei ? gwei(t.gasPriceWei) : undefined],
+    ['nonce', t.nonce],
+    ['종류', t.input && t.input !== '0x' ? '컨트랙트 호출' : '송금'],
+    ['이벤트 로그', t.logCount !== undefined ? `${t.logCount}개` : undefined],
+  ];
+  return [h('h2', {}, '트랜잭션'), kv(rows)];
+}
+
+async function blockView(id) {
+  const b = await api(`/blocks/${id}`);
+  const prev = BigInt(b.number) > 0n ? link(`#/block/${BigInt(b.number) - 1n}`, '← 이전', '') : null;
+  return [
+    h('h2', {}, `블록 #${formatInteger(b.number)} `, prev, ' ', link(`#/block/${BigInt(b.number) + 1n}`, '다음 →', '')),
+    kv([
+      ['블록 해시', h('span', { class: 'mono' }, b.hash)],
+      ['시각', new Date(b.timestamp).toLocaleString()],
+      ['생성자', addrLink(b.miner)],
+      ['가스 사용', `${formatInteger(b.gasUsed)} / ${formatInteger(b.gasLimit)}`],
+      ['기본 수수료', b.baseFeePerGasWei ? gwei(b.baseFeePerGasWei) : undefined],
+      ['tx 수', formatInteger(String(b.txCount))],
+    ]),
+    h('ul', { class: 'txs' }, b.transactions.map((tx) => h('li', {}, link(`#/tx/${tx}`, shortHex(tx, 10))))),
+  ];
+}
+
+async function addressView(address) {
+  const a = await api(`/addresses/${address}`);
+  return [
+    h('h2', {}, a.type === 'contract' ? '컨트랙트' : '주소'),
+    kv([
+      ['주소', h('span', { class: 'mono' }, a.address)],
+      ['잔액', eth(a.balanceWei)],
+      ['nonce', a.nonce],
+    ]),
+    h('p', { class: 'muted' }, '이 주소의 tx 목록은 인덱서(DB) 단계에서 추가됩니다.'),
+  ];
+}
+
+const homeView = () => blockView('latest');
+
+/* ── 라우터 ─────────────────────────────────────────────────────────────── */
+
+const routes = [
+  [/^#\/tx\/(0x[0-9a-fA-F]{64})$/, txView],
+  [/^#\/block\/(latest|\d+)$/, blockView],
+  [/^#\/address\/(0x[0-9a-fA-F]{40})$/, addressView],
+];
+
+const ERROR_TEXT = {
+  not_found: '찾을 수 없습니다.',
+  rpc_unavailable: '노드(RPC)에 연결할 수 없습니다. 잠시 후 다시 시도하세요.',
+};
+
+let renderSeq = 0;
+async function render() {
+  const seq = ++renderSeq; // 느린 이전 요청이 나중에 도착해 화면을 덮어쓰지 않게
+  const hash = location.hash;
+  const route = routes.find(([re]) => re.test(hash));
+  const fn = route ? (...a) => route[1](...a) : homeView;
+  const arg = route ? hash.match(route[0])[1] : undefined;
+
+  view.replaceChildren(h('p', { class: 'muted' }, '불러오는 중…'));
+  try {
+    const nodes = await fn(arg);
+    if (seq === renderSeq) view.replaceChildren(...nodes);
+  } catch (err) {
+    if (seq !== renderSeq) return;
+    const msg = ERROR_TEXT[err.message] ?? `오류: ${err.message}`;
+    view.replaceChildren(h('p', { class: 'error' }, msg));
+  }
+}
+
+/* ── 검색 ───────────────────────────────────────────────────────────────── */
+
+$('search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const target = routeForQuery($('q').value);
+  $('search-error').hidden = !!target;
+  if (!target) {
+    $('search-error').textContent = 'tx 해시(0x+64자), 주소(0x+40자), 블록 번호 중 하나를 입력하세요.';
+    return;
+  }
+  if (location.hash === target) render();
+  else location.hash = target;
+});
+
+/* ── 서버 상태 표시 ─────────────────────────────────────────────────────── */
+
+async function refreshStatus() {
+  const el = $('status');
+  try {
+    const s = await api('/health');
+    el.dataset.state = 'ok';
+    el.textContent = `chainId ${s.chainId} · #${formatInteger(s.block)}`;
+  } catch (err) {
+    el.dataset.state = 'error';
+    el.textContent = err.message === 'rpc_unavailable' ? 'RPC 연결 끊김' : '서버 연결 끊김';
+  }
+}
+
+window.addEventListener('hashchange', render);
+render();
+refreshStatus();
+setInterval(refreshStatus, 12_000);
