@@ -6,7 +6,7 @@
 #
 # 무엇을 하나
 #   1) test   : server / client / legacy 테스트를 패키지별로 동시에 돌린다
-#   2) docker : 1 이 통과하면 이미지를 빌드해 띄우고 smoke test (nginx → api, 로드밸런싱)
+#   2) docker : 1 이 통과하면 이미지를 빌드해 띄우고 smoke test (nginx → api → DB, 로드밸런싱)
 #
 # 아직 안 하는 것: 서버에 배포 (CD) → 마지막 단계
 
@@ -42,6 +42,19 @@ jobs:
       run:
         working-directory: ${{ matrix.package }}
 
+    # job 옆에 Postgres 컨테이너를 하나 붙인다. server 의 DB 테스트(test/db.test.js)가 쓴다.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 3s --health-retries 20
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+
     steps:
       - name: 코드 가져오기
         uses: actions/checkout@v4
@@ -52,8 +65,11 @@ jobs:
           # 로컬(nvm use)과 CI 가 같은 버전을 쓰도록 버전을 한 파일에서만 관리한다.
           node-version-file: .nvmrc
 
-      # 지금은 세 패키지 모두 외부 의존성이 0개라 npm ci 단계가 없다.
-      # 의존성이 생기면 package-lock.json 을 커밋하고 여기에 `npm ci` 를 추가한다.
+      # 의존성 설치. package-lock.json 이 있는 패키지만 (지금은 server 의 pg 하나).
+      # npm install 이 아니라 npm ci: lock 파일과 정확히 같은 버전만 설치하고, 다르면 실패한다.
+      - name: 의존성 설치
+        if: hashFiles(format('{0}/package-lock.json', matrix.package)) != ''
+        run: npm ci
 
       - name: 테스트
         run: npm test
@@ -72,7 +88,11 @@ jobs:
 
       - name: 이미지 빌드 + 컨테이너 띄우기
         # --wait: 모든 컨테이너가 healthy 가 될 때까지 기다린다
-        run: docker compose up -d --build --wait --wait-timeout 60
+        # RPC 를 일부러 닿지 않는 주소로 둔다. CI 가 메인넷에 요청을 쏘거나 그 상태에 좌우되지 않게.
+        # (worker 는 재시도만 하고, health 는 503, 나머지 점검은 RPC 와 무관하다)
+        env:
+          RPC_HTTP_URL: http://127.0.0.1:1
+        run: docker compose up -d --build --wait --wait-timeout 90
 
       - name: smoke test
         run: ./scripts/smoke.sh

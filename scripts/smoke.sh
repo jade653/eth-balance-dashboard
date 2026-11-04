@@ -36,7 +36,15 @@ body=$(curl -s -w ' %{http_code}' "$BASE/api/v1/nope")
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/health")
 [[ $code == 200 || $code == 503 ]] && pass "GET /api/v1/health → $code" || bad "GET /api/v1/health → $code"
 
-# 3) 로드밸런싱: 여러 번 요청하면 서로 다른 인스턴스가 받는다 (x-served-by 헤더)
+# 3) api → Postgres. worker 가 스키마를 만든 뒤라야 200 이므로 잠깐 기다려 준다.
+for _ in $(seq 20); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/addresses/0x0000000000000000000000000000000000000000/txs")
+  [[ $code == 200 ]] && break
+  sleep 1
+done
+[[ $code == 200 ]] && pass "GET /api/v1/addresses/{a}/txs → $code (api 가 DB 를 읽음)" || bad "GET /api/v1/addresses/{a}/txs → $code"
+
+# 4) 로드밸런싱: 여러 번 요청하면 서로 다른 인스턴스가 받는다 (x-served-by 헤더)
 want="${EXPECT_INSTANCES:-3}"
 seen=$(for _ in $(seq $((want * 4))); do
   curl -s -D - -o /dev/null "$BASE/api/v1/nope" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-served-by"{print $2}'

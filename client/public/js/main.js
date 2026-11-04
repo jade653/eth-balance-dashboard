@@ -94,7 +94,11 @@ async function blockView(id) {
 }
 
 async function addressView(address) {
-  const a = await api(`/addresses/${address}`);
+  // 잔액은 노드에서, tx 목록은 DB 에서. 둘 중 목록만 실패해도 잔액은 보여준다.
+  const [a, list] = await Promise.all([
+    api(`/addresses/${address}`),
+    api(`/addresses/${address}/txs`).catch((err) => err),
+  ]);
   return [
     h('h2', {}, a.type === 'contract' ? '컨트랙트' : '주소'),
     kv([
@@ -102,8 +106,63 @@ async function addressView(address) {
       ['잔액', eth(a.balanceWei)],
       ['nonce', a.nonce],
     ]),
-    h('p', { class: 'muted' }, '이 주소의 tx 목록은 인덱서(DB) 단계에서 추가됩니다.'),
+    txListSection(address, list),
   ];
+}
+
+const DIRECTION = { in: '받음', out: '보냄', self: '자기 자신' };
+
+/** 주소의 tx 목록 + "더 보기" (커서로 다음 페이지) */
+function txListSection(address, first) {
+  const section = h('section', { class: 'txlist' });
+  if (first instanceof Error) {
+    section.append(h('p', { class: 'error' }, ERROR_TEXT[first.message] ?? `tx 목록 오류: ${first.message}`));
+    return section;
+  }
+
+  const c = first.coverage;
+  section.append(
+    h('h3', {}, '최근 tx'),
+    h('p', { class: 'muted' }, c
+      ? `인덱서가 보관 중인 범위만 보입니다: 블록 ${formatInteger(c.fromBlock)} ~ ${formatInteger(c.toBlock)} (${new Date(c.fromTime).toLocaleString()} 이후)`
+      : '인덱서가 아직 블록을 쌓지 않았습니다.'),
+  );
+
+  const tbody = h('tbody');
+  const table = h('table', {}, h('thead', {}, h('tr', {},
+    h('th', {}, 'tx'), h('th', {}, '블록'), h('th', {}, '시각'), h('th', {}, ''), h('th', {}, '상대 주소'), h('th', { class: 'num' }, '금액'))), tbody);
+  const more = h('button', { type: 'button' }, '더 보기');
+
+  const append = (page) => {
+    for (const t of page.items) {
+      const other = t.direction === 'in' ? t.from : t.to;
+      tbody.append(h('tr', {},
+        h('td', {}, link(`#/tx/${t.hash}`, shortHex(t.hash, 6))),
+        h('td', {}, blockLink(t.blockNumber)),
+        h('td', { class: 'muted' }, new Date(t.timestamp).toLocaleTimeString()),
+        h('td', {}, h('span', { class: `badge ${t.direction}` }, DIRECTION[t.direction])),
+        h('td', {}, other ? link(`#/address/${other}`, shortHex(other, 6)) : h('span', { class: 'muted' }, '컨트랙트 생성')),
+        h('td', { class: 'num' }, eth(t.valueWei, 6)),
+      ));
+    }
+    more.hidden = !page.nextCursor;
+    more.onclick = async () => {
+      more.disabled = true;
+      try {
+        append(await api(`/addresses/${address}/txs?cursor=${page.nextCursor}`));
+      } finally {
+        more.disabled = false;
+      }
+    };
+  };
+
+  if (first.items.length === 0) {
+    section.append(h('p', {}, '이 기간에는 tx 가 없습니다.'));
+  } else {
+    section.append(h('div', { class: 'table-wrap' }, table), more);
+    append(first);
+  }
+  return section;
 }
 
 const homeView = () => blockView('latest');
@@ -119,6 +178,7 @@ const routes = [
 const ERROR_TEXT = {
   not_found: '찾을 수 없습니다.',
   rpc_unavailable: '노드(RPC)에 연결할 수 없습니다. 잠시 후 다시 시도하세요.',
+  db_unavailable: 'DB 에 연결할 수 없어 tx 목록을 불러오지 못했습니다.',
 };
 
 let renderSeq = 0;

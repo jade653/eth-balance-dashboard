@@ -13,9 +13,11 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787
 
-# 의존성이 생기면 package-lock.json 도 복사하고 `RUN npm ci --omit=dev` 를 여기에 둔다.
-# 코드보다 먼저 복사하는 이유: 코드만 바뀌었을 때 의존성 설치 단계를 캐시로 건너뛰기 위해서다.
-COPY package.json ./
+# 의존성(pg) 설치. package-lock.json 에 적힌 버전 그대로 설치한다 (npm ci).
+# 코드보다 먼저 복사하는 이유: 코드만 바뀌었을 때 이 단계를 캐시로 건너뛰기 위해서다.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
 COPY src ./src
 
 # root 로 돌리지 않는다. 앱이 뚫려도 컨테이너 안에서조차 권한이 없게.

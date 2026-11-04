@@ -6,6 +6,7 @@ import http from 'node:http';
 import os from 'node:os';
 import { createApp } from './app.js';
 import { RpcClient } from './rpc.js';
+import { createPool, createStore } from './db.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // 컨테이너 안에서는 0.0.0.0 이어야 밖(nginx 컨테이너)에서 닿는다. 로컬 기본은 127.0.0.1.
@@ -17,7 +18,15 @@ const RPC_URLS = (process.env.RPC_HTTP_URL ?? 'https://ethereum-rpc.publicnode.c
   .filter(Boolean);
 
 const rpc = new RpcClient(RPC_URLS);
-const app = createApp({ rpc });
+
+// DB 는 선택이다. 없으면 tx·블록·주소 조회(노드 직접)는 되고, 주소별 tx 목록만 503 이 된다.
+const pool = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL) : null;
+const noDb = async () => { throw new Error('DATABASE_URL not set'); };
+const store = pool
+  ? createStore(pool)
+  : { latestBlock: noDb, coverage: noDb, listAddressTxs: noDb };
+
+const app = createApp({ rpc, store });
 
 // 컨테이너 안에서 hostname 은 컨테이너 ID 다. 응답마다 붙여 두면
 // nginx 가 요청을 여러 인스턴스에 나눠 주는 모습을 헤더로 직접 볼 수 있다.
@@ -36,7 +45,10 @@ server.listen(PORT, HOST, () => {
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     console.log(`${sig} received, shutting down`);
-    server.close(() => process.exit(0));
+    server.close(async () => {
+      await pool?.end();
+      process.exit(0);
+    });
     setTimeout(() => process.exit(1), 5000).unref();
   });
 }
