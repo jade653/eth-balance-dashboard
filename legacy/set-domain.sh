@@ -24,7 +24,9 @@
 
 set -euo pipefail
 
-DOMAIN_DEFAULT="test.mustree.kr"
+# 도메인은 저장소에 적지 않는다. 인자로 주거나, 같은 디렉터리의 deploy.env(커밋 안 됨)에 DOMAIN_DEFAULT=... 로 둔다.
+DOMAIN_DEFAULT=""
+[ -f "$(dirname "${BASH_SOURCE[0]}")/deploy.env" ] && . "$(dirname "${BASH_SOURCE[0]}")/deploy.env"
 APP_NAME="eth-dashboard"                       # deploy.sh 의 APP_NAME 과 동일해야 함
 UNIT_PATH="/etc/systemd/system/${APP_NAME}.service"
 SITE="/etc/nginx/sites-available/$APP_NAME"
@@ -50,6 +52,7 @@ for a in "$@"; do
   esac
 done
 [ -z "$DOMAIN" ] && DOMAIN="$DOMAIN_DEFAULT"
+[ -z "$DOMAIN" ] && { echo "도메인을 인자로 주거나 deploy.env 에 DOMAIN_DEFAULT 를 설정하세요." >&2; exit 1; }
 
 CERT_DIR="/etc/letsencrypt/live/$DOMAIN"
 CERT="$CERT_DIR/fullchain.pem"

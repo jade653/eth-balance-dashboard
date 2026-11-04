@@ -1,8 +1,8 @@
 # 작업 인계
 
 > **경로 변경 (2026-11):** 리팩토링 실습을 시작하면서 이 코드 전체가 `legacy/` 로 옮겨졌다.
-> 아래 명령의 `cd /mnt/nas4/kmj/eth-balance-dashboard` 는 이제
-> `cd /mnt/nas4/kmj/eth-balance-dashboard/legacy` 다. `deploy.sh` 는 자기 위치를
+> 아래 명령의 `cd <배포 디렉터리>` 는 이제
+> `cd <배포 디렉터리>/legacy` 다. `deploy.sh` 는 자기 위치를
 > 소스 디렉터리로 쓰므로 그 외에는 바뀐 게 없다.
 
 마지막 갱신: 2026-09-08
@@ -40,7 +40,7 @@ curl -s localhost:8787/api/health | grep storage
 sudo 비밀번호가 필요해서 **별도 터미널에서 직접** 해야 한다.
 
 ```bash
-cd /mnt/nas4/kmj/eth-balance-dashboard
+cd <배포 디렉터리>
 nvm use                    # .nvmrc -> 24. 빼먹으면 버전 게이트에 걸려 중단된다
 ./deploy.sh                # 점검만. 시스템 변경 없음
 ./deploy.sh --apply        # 적용 (서비스 재시작)

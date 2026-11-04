@@ -33,7 +33,7 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 이 스크립트가 
 
 # 같은 디렉터리에 deploy.env 가 있으면 위 기본값을 덮어쓴다.
 # deploy.sh 를 다시 전송해도 설정값이 초기화되지 않도록 분리해 두는 용도다.
-#   예) echo 'SERVER_NAME="test.mustree.kr"' > deploy.env
+#   예) echo 'SERVER_NAME="dashboard.example.com"' > deploy.env
 if [ -f "$SRC_DIR/deploy.env" ]; then
   # shellcheck disable=SC1091
   . "$SRC_DIR/deploy.env"
