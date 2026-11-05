@@ -37,14 +37,35 @@ cd <배포 디렉터리>
 ### 2. `.env` 만들기 (커밋되지 않는다)
 
 ```bash
+mkdir -p <데이터 디렉터리>/pgdata
 cat > .env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 RPC_HTTP_URL=https://ethereum-rpc.publicnode.com
 RETENTION_HOURS=24
 WEB_PORT=8080
+PGDATA_DIR=<데이터 디렉터리>/pgdata
 EOF
 chmod 600 .env
 ```
+
+`PGDATA_DIR` 를 빼면 DB 는 Docker 볼륨(서버 디스크의 `/var/lib/docker`)에 저장된다.
+서버 디스크 대신 별도 저장소(NAS 등)에 두려면 지정한다. **절대경로**여야 한다.
+
+> **NAS(네트워크 파일시스템)에 DB 를 둘 때 — 먼저 시험해 볼 것.**
+> Postgres 는 파일 잠금·fsync·소유권 변경(chown)에 민감하다. NFS 는 대체로 되지만
+> SMB/CIFS 는 권한 문제로 아예 안 뜨는 경우가 많다. 2분이면 확인된다:
+>
+> ```bash
+> findmnt -T <데이터 디렉터리>          # FSTYPE 확인 (nfs / nfs4 / cifs …)
+> mkdir -p <데이터 디렉터리>/pgtest
+> docker run -d --name pg-nas-test -e POSTGRES_PASSWORD=t \
+>   -v <데이터 디렉터리>/pgtest:/var/lib/postgresql/data postgres:17-alpine
+> sleep 20; docker logs pg-nas-test 2>&1 | tail -5; docker exec pg-nas-test pg_isready
+> docker rm -f pg-nas-test
+> ```
+>
+> 마지막 줄이 `accepting connections` 면 사용 가능. 시험 폴더(`pgtest`)는 지운다
+> (컨테이너가 다른 소유자로 만들었으면 `docker run --rm -v <데이터 디렉터리>:/d alpine rm -rf /d/pgtest`).
 
 ### 3. 첫 배포
 
@@ -101,6 +122,7 @@ crontab -e                                     # legacy/notify.js 줄 삭제 (�
 | 되돌린 걸 풀기 | `.env` 에서 `IMAGE_TAG` 줄 삭제 → `./deploy/update.sh` |
 | 로그 | `docker compose -f compose.yaml -f deploy/compose.prod.yaml logs -f <web\|api\|worker\|db>` |
 | 인덱서 상태 | `curl -s 127.0.0.1:8080/api/v1/health` 의 `indexer.lag` (0~2 면 정상) |
+| 컨테이너 로그 | 서비스당 최대 30MB (10MB × 3, compose.yaml 의 `x-logging`) — 넘으면 오래된 것부터 지워진다 |
 | DB 백업 | `docker compose -f compose.yaml -f deploy/compose.prod.yaml exec db pg_dump -U explorer explorer > backup.sql` |
 
 > **배포 중 짧은 끊김:** `up -d` 는 바뀐 컨테이너를 내렸다 올린다. api 3개가 동시에 교체되는

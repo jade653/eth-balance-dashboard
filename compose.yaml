@@ -5,7 +5,7 @@
 #   docker compose logs -f worker         # 인덱서 진행 상황
 #   docker compose logs -f web            # nginx 로그 (어느 api 가 받았는지 보인다)
 #   docker compose down                   # 내리기 (DB 데이터는 볼륨에 남는다)
-#   docker compose down -v                # 내리고 DB 데이터까지 삭제
+#   docker compose down -v                # 내리고 DB 데이터까지 삭제 (PGDATA_DIR 를 쓰면 그 폴더는 직접 지워야 함)
 #
 #   [브라우저] ──:8080──▶ [web: nginx] ──▶ [api × 3] ──┬──▶ 이더리움 RPC   (tx·블록·주소 조회)
 #                                                      └──▶ [db: Postgres] (주소별 tx 목록, 읽기)
@@ -14,6 +14,14 @@
 #                               └──────────▶ 이더리움 RPC
 
 x-db-url: &db-url postgres://explorer:${POSTGRES_PASSWORD:-explorer}@db:5432/explorer
+
+# 컨테이너 로그(stdout)는 Docker 가 서버 디스크(/var/lib/docker)에 파일로 쌓는다. 기본은 크기 제한이 없다.
+# 서비스마다 10MB × 3개 = 최대 30MB 로 묶는다. 넘으면 오래된 것부터 지워진다.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   db:
@@ -24,14 +32,17 @@ services:
       # 로컬 기본값. 실제 서버에서는 .env 에 POSTGRES_PASSWORD 를 꼭 바꿔 둘 것 (커밋 금지).
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-explorer}
     volumes:
-      # 컨테이너를 지우고 다시 만들어도 데이터는 이 볼륨에 남는다
-      - pgdata:/var/lib/postgresql/data
+      # DB 파일이 저장되는 곳. 컨테이너를 지우고 다시 만들어도 남는다.
+      #   PGDATA_DIR 미설정 → Docker 볼륨 "pgdata" (Docker 가 관리, 서버 디스크의 /var/lib/docker 아래)
+      #   PGDATA_DIR=/절대/경로 → 그 폴더를 그대로 사용 (bind mount). 서버에서는 .env 에 지정한다.
+      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "explorer", "-d", "explorer"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    logging: *logging
     # ports 가 없다 = DB 는 컨테이너끼리만 보인다. 밖에서 직접 접속할 수 없다.
 
   worker:
@@ -58,6 +69,7 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    logging: *logging
 
   api:
     build: ./server
@@ -75,6 +87,7 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    logging: *logging
     # ports 가 없다 = 호스트 밖에서 직접 접근 불가. nginx 를 통해서만 들어온다.
 
   web:
@@ -88,6 +101,7 @@ services:
       api:
         condition: service_healthy     # api 가 대답할 수 있게 된 뒤에 nginx 를 띄운다
     restart: unless-stopped
+    logging: *logging
 
 volumes:
   pgdata:
