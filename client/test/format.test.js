@@ -71,3 +71,13 @@ test('percent', () => {
   assert.equal(percent('15000000', '30000000'), '50.00%');
   assert.equal(percent('1', '0'), '-');
 });
+
+import { formatGasPrice } from '../public/js/format.js';
+
+test('formatGasPrice: Gwei 로 0 이 되는 작은 값은 wei 로', () => {
+  assert.equal(formatGasPrice('2500000000'), '2.5 Gwei');   // 이더리움 수준
+  assert.equal(formatGasPrice('100000'), '0.0001 Gwei');    // Gwei 소수 4자리로 보이는 가장 작은 값
+  assert.equal(formatGasPrice('99999'), '99,999 wei');      // 그보다 작으면 wei
+  assert.equal(formatGasPrice('7'), '7 wei');               // Mustsem base fee 0x7
+  assert.equal(formatGasPrice('0'), '0 Gwei');              // 진짜 0 은 0
+});

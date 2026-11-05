@@ -9,7 +9,7 @@
  * 화면 전환은 URL 의 # 뒤로 한다. 서버(nginx)는 언제나 index.html 하나만 주면 된다.
  * 체인에서 온 값은 전부 textContent 로만 넣는다 (innerHTML 금지 → XSS 차단).
  */
-import { formatInteger, weiToEth, shortHex, routeForQuery, timeAgo, methodLabel, percent } from './format.js';
+import { formatInteger, weiToEth, shortHex, routeForQuery, timeAgo, methodLabel, percent, formatGasPrice } from './format.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -68,7 +68,7 @@ const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 const minerCell = (m, keep) => (!m ? h('span', { class: 'muted' }, '-')
   : m.toLowerCase() === ZERO_ADDR ? h('span', { class: 'muted', title: 'PoA 체인: 블록 서명자는 extraData 의 서명에 있다' }, '— (PoA)')
     : addrLink(m, keep));
-const gwei = (wei) => `${weiToEth(BigInt(wei) * 10n ** 9n, 4)} Gwei`; // wei → gwei
+const gwei = (wei) => formatGasPrice(wei); // 보통 Gwei, Gwei 로 0 이 되는 작은 값은 wei
 /** 실시간으로 줄어드는 "N초 전". data-ts 를 달아 두면 아래 타이머가 매초 다시 쓴다 */
 const age = (iso) => h('span', { class: 'age', 'data-ts': iso, title: localTime(iso) }, timeAgo(iso));
 const localTime = (iso) => new Date(iso).toLocaleString('ko-KR', { hour12: false, timeZoneName: 'short' });

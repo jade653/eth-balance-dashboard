@@ -89,3 +89,15 @@ export function percent(a, b) {
   if (!y) return '-';
   return `${((x / y) * 100).toFixed(2)}%`;
 }
+
+/**
+ * 가스 가격(wei) 표시. 보통은 Gwei(= 10^9 wei) 로 보여주지만,
+ * Gwei 로 바꾸면 "0" 으로 보이는데 실제로는 0 보다 큰 값이면 wei 로 보여준다.
+ * 예) 이더리움 base fee 2.5 Gwei → "2.5 Gwei",  PoA 체인 base fee 7 wei → "7 wei" (Gwei 면 "0 Gwei")
+ */
+export function formatGasPrice(wei) {
+  const v = BigInt(wei);
+  const g = weiToEth(v * 10n ** 9n, 4); // wei → Gwei, 소수 4자리
+  if (g === '0' && v > 0n) return `${formatInteger(v.toString())} wei`;
+  return `${g} Gwei`;
+}
