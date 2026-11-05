@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ETH Explorer</title>
+  <script>
+    // 저장된 테마를 화면이 그려지기 전에 적용 (늦게 하면 반대 색으로 한 번 번쩍인다)
+    try {
+      var t = localStorage.getItem('theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) { /* 저장소를 못 쓰는 환경이면 자동 */ }
+  </script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -28,6 +35,7 @@
         <a href="#/txs">트랜잭션</a>
       </nav>
       <span id="status" class="status">연결 확인 중…</span>
+      <button id="theme-toggle" class="theme-toggle" type="button"></button>
     </div>
   </header>
 

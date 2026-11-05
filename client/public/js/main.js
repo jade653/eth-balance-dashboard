@@ -519,6 +519,38 @@ async function render() {
 window.addEventListener('hashchange', render);
 render();
 
+/* ── 상단 바: 테마 (자동 → 밝게 → 어둡게) ─────────────────────────────── */
+
+const THEMES = [
+  ['auto', '자동', 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2v16a8 8 0 0 1 0-16Z'],
+  ['light', '밝게', 'M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10ZM11 1h2v3h-2V1Zm0 19h2v3h-2v-3ZM1 11h3v2H1v-2Zm19 0h3v2h-3v-2ZM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4Zm14.9 14.9 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4ZM2.8 19.8l2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4ZM17.7 4.9l2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4Z'],
+  ['dark', '어둡게', 'M14 2a9 9 0 1 0 8 13.1A8 8 0 0 1 14 2Z'],
+];
+
+function currentTheme() {
+  const t = document.documentElement.dataset.theme;
+  return t === 'light' || t === 'dark' ? t : 'auto';
+}
+
+function applyTheme(t) {
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  try {
+    if (t === 'auto') localStorage.removeItem('theme');
+    else localStorage.setItem('theme', t);
+  } catch { /* 저장 못 해도 이번 화면에는 적용된다 */ }
+  const [, label, path] = THEMES.find(([k]) => k === t);
+  const btn = $('#theme-toggle');
+  btn.replaceChildren(icon(path), `테마: ${label}`);
+  btn.title = '누를 때마다 자동 → 밝게 → 어둡게';
+}
+
+$('#theme-toggle').addEventListener('click', () => {
+  const i = THEMES.findIndex(([k]) => k === currentTheme());
+  applyTheme(THEMES[(i + 1) % THEMES.length][0]);
+});
+applyTheme(currentTheme());
+
 /* ── 상단 바: 연결 상태 ─────────────────────────────────────────────────── */
 
 async function refreshStatus() {
