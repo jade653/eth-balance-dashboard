@@ -58,4 +58,6 @@ else
 fi
 
 # 5) 더 이상 안 쓰는 옛 이미지 정리 (디스크)
-docker image prune -f >/dev/null
+# 공용 서버일 수 있으므로 "우리 저장소에서 만든 이미지"만 지운다 (CI 가 붙인 source 라벨로 구분).
+# 필터 없이 prune 하면 같은 서버의 다른 사람 이미지까지 지운다.
+docker image prune -f --filter "label=org.opencontainers.image.source=https://github.com/jade653/eth-balance-dashboard" >/dev/null
