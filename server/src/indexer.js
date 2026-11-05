@@ -9,6 +9,54 @@
 const hex = (n) => '0x' + n.toString(16);
 
 /**
+ * DB 의 데이터가 지금 RPC 가 가리키는 체인의 것인지 확인한다.
+ *
+ *   'empty'    DB 가 비어 있음 → 이 체인으로 새로 시작 (chain_id 를 기록)
+ *   'ok'       같은 체인
+ *   'mismatch' 다른 체인의 데이터가 들어 있음 → 그대로 두면 인덱서가 멈춘다
+ *
+ * chain_id 를 적어 두기 전(003 마이그레이션 이전)에 쌓인 데이터는 기록이 없다.
+ * 그때는 DB 의 마지막 블록과 같은 번호의 블록을 RPC 에 물어 해시가 같은지로 판단한다.
+ * (번호가 같아도 체인이 다르면 해시가 다르고, 새 체인에 그 번호가 아직 없으면 null 이다)
+ */
+export async function checkChain(rpc, store) {
+  const chainId = String(Number(BigInt(await rpc.call('eth_chainId'))));
+  const latest = await store.latestBlock();
+  const saved = await store.getMeta('chain_id');
+
+  if (!latest) {
+    await store.setMeta('chain_id', chainId);
+    return { status: 'empty', chainId };
+  }
+  if (saved) {
+    return saved === chainId ? { status: 'ok', chainId } : { status: 'mismatch', chainId, saved };
+  }
+  const b = await rpc.call('eth_getBlockByNumber', [hex(BigInt(latest.number)), false]);
+  if (b && b.hash === latest.hash) {
+    await store.setMeta('chain_id', chainId);
+    return { status: 'ok', chainId };
+  }
+  return { status: 'mismatch', chainId, saved: '(기록 없음 — 블록 해시가 다름)' };
+}
+
+/**
+ * 체인의 평균 블록 간격(초)을 잰다. 최신 블록과 sample 개 전 블록의 시각 차이 / sample.
+ * "24시간 = 몇 블록인가"는 체인마다 다르다 (이더리움 12초, PoA 체인은 보통 1~5초).
+ */
+export async function measureBlockTime(rpc, sample = 1000) {
+  const head = BigInt(await rpc.call('eth_blockNumber'));
+  const n = head > BigInt(sample) ? BigInt(sample) : head;
+  if (n === 0n) return null;
+  const [a, b] = await rpc.batch([
+    { method: 'eth_getBlockByNumber', params: [hex(head - n), false] },
+    { method: 'eth_getBlockByNumber', params: [hex(head), false] },
+  ]);
+  if (!a || !b) return null;
+  const secs = Number(BigInt(b.timestamp) - BigInt(a.timestamp)) / Number(n);
+  return secs > 0 ? secs : null;
+}
+
+/**
  * @param rpc   { call, batch }
  * @param store createStore() 의 결과
  * @param opts  retentionBlocks: 보관할 블록 수 (처음 시작 지점을 정한다)

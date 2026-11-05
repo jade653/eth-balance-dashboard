@@ -57,7 +57,17 @@ const ICON = {
 const link = (href, text, cls) => h('a', { href, class: cls }, text);
 const addrLink = (a, keep = 8) => (a ? link(`#/address/${a}`, shortHex(a, keep), 'mono') : h('span', { class: 'muted' }, '—'));
 const blockLink = (n) => link(`#/block/${n}`, formatInteger(String(n)));
-const eth = (wei, digits = 18) => `${weiToEth(wei, digits)} ETH`;
+/** 화면에 보일 체인 이름·잔액 단위. 시작할 때 /api/v1/chain 에서 받아 채운다 */
+const CHAIN = { chainId: null, name: 'Ethereum', symbol: 'ETH' };
+const eth = (wei, digits = 18) => `${weiToEth(wei, digits)} ${CHAIN.symbol}`;
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+/**
+ * 블록 생성자. PoA(Clique) 체인은 miner 칸이 0x000…0 이고 실제 서명자는 extraData 의 서명에 들어 있다.
+ * 0 주소를 그대로 링크로 보여주면 "모든 블록을 0 주소가 만들었다"로 읽히므로 따로 표시한다.
+ */
+const minerCell = (m, keep) => (!m ? h('span', { class: 'muted' }, '-')
+  : m.toLowerCase() === ZERO_ADDR ? h('span', { class: 'muted', title: 'PoA 체인: 블록 서명자는 extraData 의 서명에 있다' }, '— (PoA)')
+    : addrLink(m, keep));
 const gwei = (wei) => `${weiToEth(BigInt(wei) * 10n ** 9n, 4)} Gwei`; // wei → gwei
 /** 실시간으로 줄어드는 "N초 전". data-ts 를 달아 두면 아래 타이머가 매초 다시 쓴다 */
 const age = (iso) => h('span', { class: 'age', 'data-ts': iso, title: localTime(iso) }, timeAgo(iso));
@@ -177,7 +187,7 @@ function blockFeedRow(b) {
       h('div', { class: 'feed-icon' }, 'Bk'),
       h('div', {}, blockLink(b.number), h('div', { class: 'small muted' }, age(b.timestamp)))),
     h('div', { class: 'small' },
-      h('span', { class: 'ellipsis' }, '생성자 ', b.miner ? addrLink(b.miner, 6) : h('span', { class: 'muted' }, '-')),
+      h('span', { class: 'ellipsis' }, '생성자 ', minerCell(b.miner, 6)),
       h('span', {}, link(`#/block/${b.number}`, `${b.txCount} txns`), h('span', { class: 'muted' }, ' 포함'))),
     h('span', { class: 'pill', title: '가스 사용률' }, b.gasUsed && b.gasLimit ? `가스 ${percent(b.gasUsed, b.gasLimit)}` : '-'));
 }
@@ -190,7 +200,7 @@ function txFeedRow(t) {
     h('div', { class: 'small' },
       h('span', { class: 'ellipsis' }, '보냄 ', addrLink(t.from, 6)),
       h('span', { class: 'ellipsis' }, '받음 ', t.to ? addrLink(t.to, 6) : h('span', { class: 'muted' }, '컨트랙트 생성'))),
-    h('span', { class: 'pill' }, `${weiToEth(t.valueWei, 5)} ETH`));
+    h('span', { class: 'pill' }, `${weiToEth(t.valueWei, 5)} ${CHAIN.symbol}`));
 }
 
 /**
@@ -265,7 +275,7 @@ async function homeView() {
   const txsBody = h('div', { class: 'card-body' }, h('div', { class: 'loading' }, '불러오는 중…'));
 
   const root = h('div', {},
-    h('section', { class: 'hero' }, h('div', { class: 'container' }, h('h1', {}, '이더리움 블록 탐색기'), form, err)),
+    h('section', { class: 'hero' }, h('div', { class: 'container' }, h('h1', {}, `${CHAIN.name} 블록 탐색기`), form, err)),
     h('div', { class: 'container' },
       statsBox,
       h('div', { class: 'home-lists' },
@@ -279,7 +289,7 @@ async function homeView() {
       ? blocks.value.items.map(blockFeedRow)
       : [h('p', { class: 'error' }, errText(blocks.reason))]));
     txsBody.replaceChildren(...(txs.status === 'fulfilled'
-      ? txs.value.items.map(txFeedRow)
+      ? (txs.value.items.length ? txs.value.items.map(txFeedRow) : [h('div', { class: 'empty' }, '보관 기간 안에 트랜잭션이 없습니다.')])
       : [h('p', { class: 'error' }, errText(txs.reason))]));
   }
   await refresh();
@@ -325,7 +335,7 @@ async function blocksView() {
       h('td', {}, blockLink(b.number)),
       h('td', { class: 'muted' }, age(b.timestamp)),
       h('td', {}, link(`#/block/${b.number}`, String(b.txCount))),
-      h('td', {}, b.miner ? addrLink(b.miner) : '-'),
+      h('td', {}, minerCell(b.miner)),
       h('td', { class: 'num' }, b.gasUsed ? `${formatInteger(b.gasUsed)} (${percent(b.gasUsed, b.gasLimit)})` : '-'),
       h('td', { class: 'num' }, b.gasLimit ? formatInteger(b.gasLimit) : '-'),
       h('td', { class: 'num' }, b.baseFeePerGasWei ? gwei(b.baseFeePerGasWei) : '-'),
@@ -364,7 +374,7 @@ async function txView(hash) {
       ? ['받는 주소', '받는 주소 또는 호출한 컨트랙트', h('span', {}, link(`#/address/${t.to}`, t.to, 'mono'), copyBtn(t.to))]
       : ['받는 주소', '받는 주소가 없으면 컨트랙트 생성', h('span', {}, '[컨트랙트 생성] ', t.contractCreated ? link(`#/address/${t.contractCreated}`, t.contractCreated, 'mono') : '-')],
     'hr',
-    ['금액', '보낸 ETH. 토큰 전송은 여기가 0 이고 이벤트 로그에 담긴다', eth(t.valueWei)],
+    ['금액', '보낸 기본 코인. 토큰 전송은 여기가 0 이고 이벤트 로그에 담긴다', eth(t.valueWei)],
     ['트랜잭션 수수료', '실제 사용한 가스 × 가스 가격', t.feeWei ? eth(t.feeWei) : undefined],
     ['가스 가격', '가스 1단위에 실제로 낸 가격', t.gasPriceWei ? h('span', {}, gwei(t.gasPriceWei), h('span', { class: 'muted' }, ` (${eth(t.gasPriceWei)})`)) : undefined],
   ]);
@@ -410,7 +420,9 @@ async function blockView(id) {
       h('a', { href: location.hash, onclick: (e) => { e.preventDefault(); document.getElementById('block-txs')?.scrollIntoView({ behavior: 'smooth' }); } },
         `트랜잭션 ${b.txCount}개`), '가 이 블록에 있음')],
     'hr',
-    ['생성자 (Fee Recipient)', '블록을 만들고 우선순위 수수료를 받은 주소', h('span', {}, link(`#/address/${b.miner}`, b.miner, 'mono'), copyBtn(b.miner))],
+    ['생성자 (Fee Recipient)', '블록을 만들고 우선순위 수수료를 받은 주소', b.miner?.toLowerCase() === ZERO_ADDR
+      ? h('span', {}, h('span', { class: 'mono' }, b.miner), h('span', { class: 'muted' }, ' — PoA 체인: 블록 서명자는 extraData 의 서명에 들어 있다'))
+      : h('span', {}, link(`#/address/${b.miner}`, b.miner, 'mono'), copyBtn(b.miner))],
     ['가스 사용', '블록 안 tx 들이 쓴 가스 합계 / 한도', `${formatInteger(b.gasUsed)} (${percent(b.gasUsed, b.gasLimit)})`],
     ['가스 한도', '블록 하나에 담을 수 있는 가스 상한', formatInteger(b.gasLimit)],
     ['기본 수수료', 'EIP-1559 base fee. 가스 1단위당, 소각된다', b.baseFeePerGasWei ? h('span', {}, gwei(b.baseFeePerGasWei), h('span', { class: 'muted' }, ` (${eth(b.baseFeePerGasWei)})`)) : undefined],
@@ -454,7 +466,7 @@ async function addressView(address) {
 
   const cards = h('div', { class: 'addr-cards' },
     card('개요', h('div', { class: 'card-body' },
-      h('div', { class: 'mini-label' }, 'ETH 잔액'),
+      h('div', { class: 'mini-label' }, `${CHAIN.symbol} 잔액`),
       h('div', { class: 'mini-value' }, eth(a.balanceWei)))),
     card('추가 정보', h('div', { class: 'card-body' },
       h('div', { class: 'mini-label' }, '유형'),
@@ -516,8 +528,18 @@ async function render() {
   }
 }
 
+/** 체인 정보를 받아 이름·단위를 정하고 고정 문구(상단 로고·제목·하단)를 채운다 */
+async function loadChain() {
+  try {
+    Object.assign(CHAIN, await api('/chain'));
+  } catch { /* 못 받으면 기본값(Ethereum/ETH)으로 */ }
+  document.title = `${CHAIN.name} Explorer`;
+  $('#brand-name').textContent = `${CHAIN.name} Explorer`;
+  $('#footer-chain').textContent = `${CHAIN.name} (chainId ${CHAIN.chainId ?? '?'})`;
+}
+
 window.addEventListener('hashchange', render);
-render();
+loadChain().then(render);
 
 /* ── 상단 바: 테마 (자동 → 밝게 → 어둡게) ─────────────────────────────── */
 
@@ -558,7 +580,7 @@ async function refreshStatus() {
   try {
     const s = await api('/health');
     el.dataset.state = 'ok';
-    el.textContent = `메인넷 · #${formatInteger(s.block)}`;
+    el.textContent = `${CHAIN.name} · #${formatInteger(s.block)}`;
   } catch (err) {
     el.dataset.state = 'error';
     el.textContent = err.message === 'rpc_unavailable' ? 'RPC 연결 끊김' : '서버 연결 끊김';

@@ -63,6 +63,8 @@ docker compose down                    # DB 데이터는 볼륨에 남는다 (-v
 |---|---|---|
 | `RPC_HTTP_URL` | publicnode 메인넷 | API 키가 든 URL 은 여기에 |
 | `POSTGRES_PASSWORD` | `explorer` | **서버에서는 반드시 바꿀 것** |
+| `CHAIN_NAME` / `NATIVE_SYMBOL` | (자동) | 화면의 체인 이름·잔액 단위. 비우면 chainId 1 → Ethereum / ETH |
+| `RESET_ON_CHAIN_CHANGE` | (없음) | `1` 이면 DB 에 다른 체인의 데이터가 있을 때 지우고 새로 쌓는다. 체인을 바꿀 때 한 번만 |
 | `RETENTION_HOURS` | `24` | 인덱서 보관 기간. 메인넷 실측 약 0.9~1.2GB/일 (tx 당 약 580바이트, 색인 포함) |
 | `WEB_PORT` | `8080` | nginx 가 여는 포트 (127.0.0.1 에만) |
 

@@ -54,6 +54,10 @@ services:
       RPC_HTTP_URL: ${RPC_HTTP_URL:-https://ethereum-rpc.publicnode.com}
       DATABASE_URL: *db-url
       RETENTION_HOURS: ${RETENTION_HOURS:-24}
+      # 비우면 체인에서 직접 잰다
+      BLOCK_TIME_S: ${BLOCK_TIME_S:-}
+      # 1 이면 DB 에 다른 체인의 데이터가 있을 때 지우고 새로 쌓는다 (체인을 바꿀 때 한 번만 켠다)
+      RESET_ON_CHAIN_CHANGE: ${RESET_ON_CHAIN_CHANGE:-}
     # 반드시 1개. 둘이면 같은 블록을 두 번 받고 리오그 되감기가 서로 꼬인다.
     deploy:
       replicas: 1
@@ -78,6 +82,9 @@ services:
       # .env 파일이나 셸 환경변수로 덮어쓸 수 있다. API 키가 든 URL 은 커밋하지 말고 .env 에.
       RPC_HTTP_URL: ${RPC_HTTP_URL:-https://ethereum-rpc.publicnode.com}
       DATABASE_URL: *db-url
+      # 화면에 보일 체인 이름·잔액 단위 (비우면 chainId 1 → Ethereum / ETH)
+      CHAIN_NAME: ${CHAIN_NAME:-}
+      NATIVE_SYMBOL: ${NATIVE_SYMBOL:-}
     # 같은 이미지로 컨테이너 3개. api 는 DB 를 "읽기만" 하고 자기 안에 상태를 두지 않으므로
     # 몇 개를 띄워도 어느 인스턴스가 받든 같은 답을 한다.
     # 주의: 인스턴스마다 DB 연결을 최대 5개 연다 (db.js). 늘리면 DB 연결 수도 같이 는다.

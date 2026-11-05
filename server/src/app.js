@@ -22,6 +22,20 @@ const routes = [
     handle: ({ rpc, store }) => health(rpc, store),
   },
   {
+    // 화면에 표시할 체인 정보. 이름·단위는 .env(CHAIN_NAME, NATIVE_SYMBOL), chainId 는 노드에서.
+    // 클라이언트는 이걸 보고 "Ethereum / ETH" 같은 글자를 정한다 — 화면 코드에 체인을 박지 않는다.
+    method: 'GET',
+    path: /^\/api\/v1\/chain$/,
+    handle: async ({ rpc, chain }) => {
+      const chainId = Number(BigInt(await rpc.call('eth_chainId')));
+      return [200, {
+        chainId,
+        name: chain.name ?? (chainId === 1 ? 'Ethereum' : `Chain ${chainId}`),
+        symbol: chain.symbol ?? 'ETH',
+      }];
+    },
+  },
+  {
     // 홈 화면 통계 (DB). 24시간 tx 수, 평균 블록 시간 등
     method: 'GET',
     path: /^\/api\/v1\/stats$/,
@@ -172,8 +186,9 @@ function sendJson(res, status, body) {
  * @param deps.rpc   { call, batch }               — 이더리움 노드
  * @param deps.store createStore() 의 결과 (DB)     — 테스트에서는 둘 다 가짜를 넣는다
  */
-export function createApp({ rpc, store }) {
+export function createApp({ rpc, store, chain = {} }) {
   const ctx = {
+    chain,
     rpc: markUpstream({ call: rpc.call.bind(rpc), batch: rpc.batch.bind(rpc) }, 'rpc_unavailable'),
     store: markUpstream(store, 'db_unavailable'),
   };

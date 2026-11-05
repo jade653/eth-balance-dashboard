@@ -115,6 +115,29 @@ sudo systemctl disable --now eth-dashboard     # legacy 앱 중지
 crontab -e                                     # legacy/notify.js 줄 삭제 (옛 /api/health 를 보므로 계속 장애 메일을 보낸다)
 ```
 
+## 다른 체인으로 바꾸기
+
+RPC 주소만 바꾸면 **DB 에 이전 체인의 데이터가 남아** 인덱서가 새 체인의 블록을 이어 쌓지 못한다.
+worker 는 시작할 때 DB 의 체인(chainId)과 RPC 의 체인을 비교하고, 다르면 멈춘 채 안내를 남긴다.
+
+```bash
+# 1) .env 수정
+RPC_HTTP_URL=<새 RPC 주소>
+CHAIN_NAME=<화면에 보일 체인 이름>        # 비우면 chainId 1 → Ethereum, 그 외 → "Chain <id>"
+NATIVE_SYMBOL=<잔액 단위>                 # 비우면 ETH
+RESET_ON_CHAIN_CHANGE=1                   # 이번 한 번만: 이전 체인 데이터를 지우고 새로 쌓는다
+
+# 2) 적용 (.env 만 바뀐 경우 update.sh 는 조용히 끝나므로 직접)
+docker compose -f compose.yaml -f deploy/compose.prod.yaml up -d
+docker compose -f compose.yaml -f deploy/compose.prod.yaml logs -f worker   # "체인이 바뀌었다 … DB 를 비운다"
+
+# 3) 확인 후 RESET_ON_CHAIN_CHANGE 줄을 지운다 (남겨 두면 실수로 RPC 를 바꿨을 때도 DB 가 지워진다)
+```
+
+블록 간격은 worker 가 체인에서 직접 잰다 (`블록 간격 N초 (최근 1000블록 측정)` 로그).
+보관 기간(`RETENTION_HOURS`)은 시간 기준이라 체인의 블록 속도와 상관없이 그 시간만큼 보관한다.
+보관 기간을 나중에 늘려도 **과거로 거슬러 채우지는 않는다** — 늘린 시점부터 더 오래 남을 뿐이다.
+
 ## 운영
 
 | 하고 싶은 것 | 방법 |

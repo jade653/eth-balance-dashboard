@@ -26,7 +26,13 @@ const store = pool
   ? createStore(pool)
   : { latestBlock: noDb, coverage: noDb, listAddressTxs: noDb };
 
-const app = createApp({ rpc, store });
+// 화면에 보일 체인 이름·잔액 단위. 비우면 chainId 1 → Ethereum/ETH, 그 외 → "Chain <id>"/ETH
+const chain = {
+  name: process.env.CHAIN_NAME || undefined,
+  symbol: process.env.NATIVE_SYMBOL || undefined,
+};
+
+const app = createApp({ rpc, store, chain });
 
 // 컨테이너 안에서 hostname 은 컨테이너 ID 다. 응답마다 붙여 두면
 // nginx 가 요청을 여러 인스턴스에 나눠 주는 모습을 헤더로 직접 볼 수 있다.

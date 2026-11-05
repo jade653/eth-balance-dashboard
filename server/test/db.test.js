@@ -10,7 +10,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPool, createStore, migrate } from '../src/db.js';
-import { syncOnce } from '../src/indexer.js';
+import { syncOnce, checkChain } from '../src/indexer.js';
 
 const URL = process.env.TEST_DATABASE_URL;
 const skip = !URL && 'TEST_DATABASE_URL 없음';
@@ -21,7 +21,7 @@ let store;
 before(async () => {
   if (skip) return;
   pool = createPool(URL);
-  await pool.query('DROP TABLE IF EXISTS txs, blocks, schema_migrations');
+  await pool.query('DROP TABLE IF EXISTS txs, blocks, meta, schema_migrations');
   await migrate(pool, () => {});
   store = createStore(pool);
 });
@@ -68,7 +68,7 @@ const syncAll = async (rpc, opts) => {
 test('migrate 는 여러 번 돌려도 같다', { skip }, async () => {
   await migrate(pool, () => {});
   const { rows } = await pool.query('SELECT count(*)::int AS n FROM schema_migrations');
-  assert.equal(rows[0].n, 2); // 001_init, 002_explorer_columns
+  assert.equal(rows[0].n, 3); // 001_init, 002_explorer_columns, 003_meta
 });
 
 test('처음 켜면 보관 범위의 시작부터, 이후엔 이어서 쌓는다', { skip }, async () => {
@@ -158,7 +158,68 @@ test('블록 번호로 tx 를 찾을 때 색인(txs_block)을 쓴다 — 롤링 
   }
 });
 
+test('체인 확인: 빈 DB → 기록 / 같은 체인 → ok / 다른 체인 → mismatch', { skip }, async () => {
+  await store.resetAll();
+  const rpcA = Object.assign(chain({ head: 30 }), {
+    async call(method, params) {
+      if (method === 'eth_chainId') return '0x1';
+      if (method === 'eth_blockNumber') return hex(30);
+      if (method === 'eth_getBlockByNumber') return (await this.batch([{ params }]))[0];
+      throw new Error(method);
+    },
+  });
+  assert.deepEqual(await checkChain(rpcA, store), { status: 'empty', chainId: '1' });
+  assert.equal(await store.getMeta('chain_id'), '1');
+
+  await syncAll(rpcA, { retentionBlocks: 5 });
+  assert.equal((await checkChain(rpcA, store)).status, 'ok');
+
+  // RPC 를 다른 체인(7601)으로 바꿈
+  const rpcB = { ...rpcA, call: async (m, p) => (m === 'eth_chainId' ? '0x1db1' : rpcA.call(m, p)) };
+  assert.deepEqual(await checkChain(rpcB, store), { status: 'mismatch', chainId: '7601', saved: '1' });
+});
+
+test('체인 확인: 기록이 없던 옛 데이터는 블록 해시로 판단한다', { skip }, async () => {
+  // 003 이전에 쌓인 상황: 데이터는 있는데 chain_id 기록이 없다
+  await pool.query('DELETE FROM meta');
+  const same = Object.assign(chain({ head: 30 }), {
+    async call(method, params) {
+      if (method === 'eth_chainId') return '0x1';
+      if (method === 'eth_getBlockByNumber') return (await this.batch([{ params }]))[0];
+      throw new Error(method);
+    },
+  });
+  assert.equal((await checkChain(same, store)).status, 'ok');
+  assert.equal(await store.getMeta('chain_id'), '1'); // 이제 기록됨
+
+  await pool.query('DELETE FROM meta');
+  // 같은 번호의 블록이 있지만 해시가 다른 체인 (fork 문자 'z')
+  const other = Object.assign(chain({ head: 30, fork: 'z', forkFrom: 0 }), {
+    async call(method, params) {
+      if (method === 'eth_chainId') return '0x1db1';
+      if (method === 'eth_getBlockByNumber') return (await this.batch([{ params }]))[0];
+      throw new Error(method);
+    },
+  });
+  assert.equal((await checkChain(other, store)).status, 'mismatch');
+
+  // 새 체인에 그 번호가 아직 없음 (지금 상황: 메인넷 2,634만 vs 7601 의 1,390만)
+  const shorter = Object.assign(chain({ head: 3 }), {
+    async call(method, params) {
+      if (method === 'eth_chainId') return '0x1db1';
+      if (method === 'eth_getBlockByNumber') return (await this.batch([{ params }]))[0];
+      throw new Error(method);
+    },
+  });
+  assert.equal((await checkChain(shorter, store)).status, 'mismatch');
+
+  await store.resetAll();
+  assert.equal(await store.latestBlock(), null);
+});
+
 test('prune: 보관 시간이 지난 블록과 그 tx 를 지운다', { skip }, async () => {
+  // 앞 테스트에 기대지 않고 직접 쌓는다 (블록 시각이 2023년이라 전부 "오래된" 블록)
+  await syncAll(chain({ head: 20, txsOf: () => [{ from: A, to: B, value: '0x1' }] }), { retentionBlocks: 5 });
   // 위 테스트의 블록 시각은 2023년이라 전부 24시간보다 오래됐다
   assert.equal(await store.prune(24 * 365 * 100), 0); // 100년 보관 → 지울 것 없음
   const removed = await store.prune(0.5);  // 소수 시간도 받는다 (실제로 0.1 에서 깨졌었다)

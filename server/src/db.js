@@ -86,6 +86,25 @@ const TX_COLS = 'hash, block_number, tx_index, from_addr, to_addr, value_wei, ts
 
 export function createStore(pool) {
   return {
+    /** meta 표의 값 하나. 없으면 null */
+    async getMeta(key) {
+      const { rows } = await pool.query('SELECT value FROM meta WHERE key = $1', [key]);
+      return rows[0]?.value ?? null;
+    },
+
+    async setMeta(key, value) {
+      await pool.query(
+        'INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+        [key, String(value)],
+      );
+    },
+
+    /** 인덱서 데이터를 전부 지운다 (체인을 바꿀 때). meta 도 비운다 */
+    async resetAll() {
+      await pool.query('TRUNCATE blocks CASCADE');
+      await pool.query('DELETE FROM meta');
+    },
+
     /** 가장 최근에 저장한 블록. 없으면 null */
     async latestBlock() {
       const { rows } = await pool.query('SELECT number, hash FROM blocks ORDER BY number DESC LIMIT 1');

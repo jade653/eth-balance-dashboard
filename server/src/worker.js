@@ -13,12 +13,15 @@
 import fs from 'node:fs';
 import { RpcClient } from './rpc.js';
 import { createPool, createStore, migrate } from './db.js';
-import { syncOnce } from './indexer.js';
+import { syncOnce, checkChain, measureBlockTime } from './indexer.js';
 
 const RPC_URLS = (process.env.RPC_HTTP_URL ?? 'https://ethereum-rpc.publicnode.com').split(',').map((s) => s.trim()).filter(Boolean);
 const DATABASE_URL = process.env.DATABASE_URL;
 const RETENTION_HOURS = Number(process.env.RETENTION_HOURS ?? 24);
-const BLOCK_TIME_S = Number(process.env.BLOCK_TIME_S ?? 12);    // 메인넷 12초
+// 비워 두면 체인에서 직접 잰다. 재는 데 실패하면 12초(이더리움)로 본다.
+const BLOCK_TIME_S = process.env.BLOCK_TIME_S ? Number(process.env.BLOCK_TIME_S) : null;
+// 1 이면 다른 체인의 데이터를 발견했을 때 지우고 새로 시작한다. 기본은 멈추고 알린다.
+const RESET_ON_CHAIN_CHANGE = process.env.RESET_ON_CHAIN_CHANGE === '1';
 const BATCH_SIZE = Number(process.env.INDEX_BATCH_SIZE ?? 5);
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
@@ -28,7 +31,7 @@ if (!DATABASE_URL) {
   process.exit(1);
 }
 // 잘못된 설정은 시작할 때 바로 죽는다. 돌다가 매 바퀴 같은 에러를 내는 것보다 낫다.
-for (const [name, v] of Object.entries({ RETENTION_HOURS, BLOCK_TIME_S, INDEX_BATCH_SIZE: BATCH_SIZE, POLL_MS })) {
+for (const [name, v] of Object.entries({ RETENTION_HOURS, BLOCK_TIME_S: BLOCK_TIME_S ?? 1, INDEX_BATCH_SIZE: BATCH_SIZE, POLL_MS })) {
   if (!Number.isFinite(v) || v <= 0) {
     console.error(`${name} 는 양수여야 한다: ${v}`);
     process.exit(1);
@@ -60,7 +63,6 @@ const beat = () => {
 const rpc = new RpcClient(RPC_URLS, { timeoutMs: 20_000 });
 const pool = createPool(DATABASE_URL, { max: 2 });
 const store = createStore(pool);
-const retentionBlocks = Math.ceil((RETENTION_HOURS * 3600) / BLOCK_TIME_S);
 
 let stopping = false;
 for (const sig of ['SIGTERM', 'SIGINT']) {
@@ -84,6 +86,39 @@ async function main() {
       await sleep(2000);
     }
   }
+
+  // 체인 확인과 블록 간격 측정은 RPC 가 필요하다. RPC 가 아직 안 되면 될 때까지 기다린다.
+  let retentionBlocks;
+  for (let wait = 2000; !stopping; wait = Math.min(wait * 2, 60_000)) {
+    beat();
+    try {
+      const chain = await checkChain(rpc, store);
+      if (chain.status === 'mismatch') {
+        if (!RESET_ON_CHAIN_CHANGE) {
+          log(`!! DB 의 데이터가 지금 RPC 의 체인(chainId ${chain.chainId})과 다르다 (DB: ${chain.saved}).`);
+          log('!! 그대로 두면 인덱서가 멈춘 것처럼 보인다. 체인을 바꾼 게 맞다면 둘 중 하나:');
+          log('!!   1) .env 에 RESET_ON_CHAIN_CHANGE=1 을 넣고 다시 띄운다 (DB 를 비우고 새로 쌓음)');
+          log('!!   2) RPC_HTTP_URL 을 원래 체인으로 되돌린다');
+          process.exit(1);
+        }
+        log(`체인이 바뀌었다 (DB: ${chain.saved} → RPC: ${chain.chainId}). RESET_ON_CHAIN_CHANGE=1 이므로 DB 를 비운다.`);
+        await store.resetAll();
+        await store.setMeta('chain_id', chain.chainId);
+      } else {
+        log(`chainId ${chain.chainId} (${chain.status === 'empty' ? '빈 DB — 새로 시작' : 'DB 와 일치'})`);
+      }
+
+      const measured = BLOCK_TIME_S ?? (await measureBlockTime(rpc));
+      const blockTime = measured ?? 12;
+      retentionBlocks = Math.ceil((RETENTION_HOURS * 3600) / blockTime);
+      log(`블록 간격 ${blockTime.toFixed(2)}초${BLOCK_TIME_S ? ' (설정값)' : measured ? ' (최근 1000블록 측정)' : ' (측정 실패, 기본값)'}`);
+      break;
+    } catch (err) {
+      log(`RPC 준비 대기 (${wait / 1000}s 후 재시도): ${err.message}`);
+      await sleep(wait);
+    }
+  }
+  if (stopping) return;
 
   log(`indexer start: 보관 ${RETENTION_HOURS}시간 ≈ ${retentionBlocks} 블록, batch ${BATCH_SIZE}`);
   let backoff = 1000;

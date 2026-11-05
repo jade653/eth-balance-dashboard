@@ -249,6 +249,27 @@ test('DB 가 죽으면 503 db_unavailable (RPC 장애와 구분된다)', async (
   assert.deepEqual(await res.json(), { error: 'db_unavailable' });
 });
 
+/* ── 체인 정보 ──────────────────────────────────────────────────────────── */
+
+test('GET /chain → 이름·단위 기본값: chainId 1 이면 Ethereum/ETH, 아니면 Chain <id>/ETH', async () => {
+  node = { eth_chainId: () => '0x1' };
+  assert.deepEqual(await (await get('/api/v1/chain')).json(), { chainId: 1, name: 'Ethereum', symbol: 'ETH' });
+  node = { eth_chainId: () => '0x1db1' };
+  assert.deepEqual(await (await get('/api/v1/chain')).json(), { chainId: 7601, name: 'Chain 7601', symbol: 'ETH' });
+});
+
+test('GET /chain → 설정(CHAIN_NAME, NATIVE_SYMBOL)이 있으면 그 값', async () => {
+  const s2 = http.createServer(createApp({ rpc: fakeRpc, store: fakeStore, chain: { name: 'Mustsem', symbol: 'MST' } }));
+  await new Promise((r) => s2.listen(0, '127.0.0.1', r));
+  try {
+    node = { eth_chainId: () => '0x1db1' };
+    const body = await (await fetch(`http://127.0.0.1:${s2.address().port}/api/v1/chain`)).json();
+    assert.deepEqual(body, { chainId: 7601, name: 'Mustsem', symbol: 'MST' });
+  } finally {
+    s2.close();
+  }
+});
+
 /* ── 홈 화면용 목록·통계 (DB) ─────────────────────────────────────────────── */
 
 test('GET /blocks, /txs → 최신 목록. limit 기본 10, 최대 25', async () => {
