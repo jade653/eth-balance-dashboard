@@ -11,6 +11,8 @@
 
 - **GitHub 은 서버를 모른다.** 서버 주소·SSH 키·비밀번호를 GitHub(코드든 Secrets 든)에 넣지 않는다.
   서버가 공개 이미지 저장소(GHCR)를 보러 간다.
+- **바뀐 쪽만 배포된다.** `client/` 만 고치면 web(nginx+화면) 이미지만, `server/` 만 고치면
+  api 이미지만 새로 올라가고, 서버에서도 그 컨테이너만 교체된다. 문서·설정만 바꾼 push 는 이미지 배포가 없다.
 - **테스트를 통과한 것만 배포된다.** 이미지는 CI 가 전부 통과해야 올라가므로, main 에 깨진 코드가
   들어가도 서버에는 마지막 정상 버전이 그대로 남는다.
 - 서버별 값(DB 비밀번호, RPC 키, 포트, 도메인)은 전부 **서버의 `.env` 와 서버의 nginx 설정**에만 있다.
@@ -118,8 +120,8 @@ crontab -e                                     # legacy/notify.js 줄 삭제 (�
 | 하고 싶은 것 | 방법 |
 |---|---|
 | 지금 바로 배포 | `./deploy/update.sh` |
-| 이전 버전으로 되돌리기 | `.env` 에 `IMAGE_TAG=sha-xxxxxxx` (GitHub 의 커밋 해시 앞 7자리) → `./deploy/update.sh` |
-| 되돌린 걸 풀기 | `.env` 에서 `IMAGE_TAG` 줄 삭제 → `./deploy/update.sh` |
+| 이전 버전으로 되돌리기 | 백엔드 `API_TAG=sha-xxxxxxx`, 프론트 `WEB_TAG=sha-xxxxxxx` 를 `.env` 에 (따로따로) → `./deploy/update.sh`. sha 는 그 이미지가 실제로 올라간 커밋이어야 한다 — GitHub 저장소의 Packages 에서 태그 목록 확인 |
+| 되돌린 걸 풀기 | `.env` 에서 그 줄 삭제 → `./deploy/update.sh` |
 | 로그 | `docker compose -f compose.yaml -f deploy/compose.prod.yaml logs -f <web\|api\|worker\|db>` |
 | 인덱서 상태 | `curl -s 127.0.0.1:8080/api/v1/health` 의 `indexer.lag` (0~2 면 정상) |
 | 컨테이너 로그 | 서비스당 최대 30MB (10MB × 3, compose.yaml 의 `x-logging`) — 넘으면 오래된 것부터 지워진다 |

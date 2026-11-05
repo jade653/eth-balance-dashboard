@@ -6,14 +6,18 @@
 #   로컬: 소스에서 직접 빌드 (eth-explorer-api:local)
 #   서버: CI 가 테스트를 통과시킨 뒤 GHCR 에 올려 둔 이미지를 받아 쓴다 — 서버는 빌드하지 않는다
 #
-# IMAGE_TAG
+# API_TAG / WEB_TAG — 프론트·백엔드를 따로 고정(롤백)할 수 있다
 #   main        : main 의 최신 (기본값)
-#   sha-<7자리> : 특정 커밋 버전. 문제가 생기면 서버의 .env 에 이 값을 적어 되돌린다 (롤백)
+#   sha-<7자리> : 특정 커밋 버전. 문제가 생기면 서버의 .env 에 적어 되돌린다
+#
+# 하나로 묶지 않는 이유: 이미지는 "바뀐 쪽만" 새로 올라간다. client/ 만 고친 커밋은
+# web 이미지에만 그 커밋의 sha 태그가 있고 api 에는 없다. 하나의 값으로 둘 다 고정하면
+# 없는 태그를 찾다가 배포가 실패한다.
 
 services:
   api:
-    image: ghcr.io/jade653/eth-explorer-api:${IMAGE_TAG:-main}
+    image: ghcr.io/jade653/eth-explorer-api:${API_TAG:-main}
   worker:
-    image: ghcr.io/jade653/eth-explorer-api:${IMAGE_TAG:-main}
+    image: ghcr.io/jade653/eth-explorer-api:${API_TAG:-main}
   web:
-    image: ghcr.io/jade653/eth-explorer-web:${IMAGE_TAG:-main}
+    image: ghcr.io/jade653/eth-explorer-web:${WEB_TAG:-main}

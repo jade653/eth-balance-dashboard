@@ -135,3 +135,4 @@ cd server && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:5432/postgres 
 4. ✅ Docker + nginx — web 1 + api 3, 로드밸런싱, CI 에서 이미지 빌드·smoke test
 5. ✅ 인덱서 — worker / api 분리, Postgres, 최근 24시간 보관, 주소별 tx 목록
 6. ✅ CD — CI 통과 시 GHCR 에 이미지, 서버 cron 이 받아 교체 (pull 방식, GitHub 에 서버 정보 없음) → [deploy/README.md](deploy/README.md)
+7. ✅ 프론트/백엔드 배포 시점 분리 — 마지막 배포 이후 `client/` 가 바뀌면 web 만, `server/` 가 바뀌면 api 만 (scripts/changed-images.sh)

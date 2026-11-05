@@ -9,7 +9,7 @@
 #   [서버 cron, 5분마다] ── 새 이미지 있나? ┘ → 있으면 pull → 컨테이너 교체 → smoke test
 #
 # 이 스크립트는 저장소를 clone 해 둔 디렉터리 안에서 돈다. 서버별 값은 전부 그 디렉터리의
-# .env (커밋 안 됨)에 둔다: POSTGRES_PASSWORD, RPC_HTTP_URL, WEB_PORT, IMAGE_TAG …
+# .env (커밋 안 됨)에 둔다: POSTGRES_PASSWORD, RPC_HTTP_URL, WEB_PORT, API_TAG, WEB_TAG …
 #
 #   crontab 예:  */5 * * * * /path/to/repo/deploy/update.sh >> /path/to/deploy.log 2>&1
 
@@ -48,12 +48,12 @@ fi
 echo "[$(ts)] 배포: git ${old_rev:0:7} → ${new_rev:0:7}"
 echo "$up_log" | grep -E 'Recreat|Creat|Start' || true
 
-# 4) 배포 후 점검. 실패하면 알리기만 한다 — 롤백은 사람이 판단한다 (.env 에 IMAGE_TAG=sha-xxxxxxx).
+# 4) 배포 후 점검. 실패하면 알리기만 한다 — 롤백은 사람이 판단한다 (.env 에 API_TAG / WEB_TAG=sha-xxxxxxx).
 port=$(grep -s '^WEB_PORT=' .env | cut -d= -f2 || true)
 if BASE="http://127.0.0.1:${port:-8080}" ./scripts/smoke.sh; then
   echo "[$(ts)] 배포 완료"
 else
-  echo "[$(ts)] !! smoke test 실패 — 'docker compose logs' 확인 후 필요하면 IMAGE_TAG 로 이전 버전 고정"
+  echo "[$(ts)] !! smoke test 실패 — 'docker compose logs' 확인 후 필요하면 API_TAG / WEB_TAG 로 이전 버전 고정"
   exit 1
 fi
 

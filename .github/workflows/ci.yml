@@ -7,7 +7,8 @@
 # 무엇을 하나
 #   1) test   : server / client / legacy 테스트를 패키지별로 동시에 돌린다
 #   2) docker : 1 이 통과하면 이미지를 빌드해 띄우고 smoke test (nginx → api → DB, 로드밸런싱)
-#   3) release: main 에 push 된 것이 1·2 를 통과하면 이미지를 GHCR 에 올린다 (서버가 받아 감)
+#   3) changes: (main push 만) 마지막 배포 이후 바뀐 이미지 판단 — client/ → web, server/ → api
+#   4) release: 1·2 를 통과하면 바뀐 이미지만 GHCR 에 올린다 (서버가 받아 감)
 
 name: CI
 
@@ -104,19 +105,67 @@ jobs:
         if: always()
         run: docker compose down
 
-  # CD 의 "GitHub 쪽 절반": main 에 들어온 코드가 test·docker 를 모두 통과하면
-  # 이미지를 GHCR(GitHub 의 이미지 저장소)에 올린다. 서버는 여기서 받아 간다 (deploy/update.sh).
+  # ── CD 의 "GitHub 쪽 절반" ───────────────────────────────────────────────
+  # main 에 들어온 코드가 test·docker 를 통과하면 이미지를 GHCR 에 올린다. 서버는 여기서 받아 간다.
   # GitHub 은 서버를 모른다 — 서버 주소·SSH 키 같은 비밀값이 필요 없다.
-  release:
-    name: release (GHCR 에 이미지 올리기)
-    needs: [test, docker]
-    # PR 에서는 돌지 않는다. main 에 들어간 것만 배포 대상이다.
+  #
+  # 프론트(web)와 백엔드(api)는 "바뀐 쪽만" 올린다 → 서버에서도 바뀐 쪽 컨테이너만 교체된다.
+  #   client/ 만 바뀜 → web 만,  server/ 만 바뀜 → api 만,  문서·설정만 바뀜 → 이미지 없음
+
+  # 무엇이 바뀌었나. 기준은 "직전 push" 가 아니라 "마지막으로 배포에 성공한 커밋" 이다.
+  # 직전 push 를 기준으로 하면, 연달아 push 해서 앞의 CI 가 취소됐을 때(위 concurrency)
+  # 그 앞 push 의 변경이 영영 배포되지 않는다.
+  changes:
+    name: changes (지난 배포 이후 바뀐 이미지)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read            # 지난 CI 실행 기록을 읽는 권한
+    outputs:
+      images: ${{ steps.diff.outputs.images }}
+
+    steps:
+      - name: 코드 가져오기 (히스토리 전체 — 기준 커밋과 비교해야 하므로)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 기준 커밋 찾기 (main 에서 마지막으로 성공한 CI = 마지막 배포)
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh run list --workflow ci.yml --branch main --event push --status success \
+                  --limit 1 --json headSha --jq '.[0].headSha // ""')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "기준(마지막 배포): ${sha:-없음 → 전부 배포}"
+
+      - name: 바뀐 이미지 판단
+        id: diff
+        run: |
+          images=$(./scripts/changed-images.sh "${{ steps.base.outputs.sha }}" "$GITHUB_SHA")
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          {
+            echo "### 배포 대상"
+            echo "- 기준: \`${{ steps.base.outputs.sha }}\` → 이번: \`$GITHUB_SHA\`"
+            echo "- 이미지: \`$images\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # 바뀐 이미지마다 job 하나. Actions 화면에 "release (web)" 처럼 따로 보인다.
+  release:
+    name: release (${{ matrix.image }})
+    needs: [test, docker, changes]
+    if: needs.changes.outputs.images != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       packages: write          # GHCR 에 올릴 권한은 이 job 에만 준다
+    strategy:
+      matrix:
+        image: ${{ fromJSON(needs.changes.outputs.images) }}
 
     steps:
       - name: 코드 가져오기
@@ -130,18 +179,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}   # GitHub 이 job 마다 자동으로 주는 임시 토큰
 
       - name: 이미지 빌드 + 올리기 (태그 main, sha-xxxxxxx)
+        env:
+          NAME: ${{ matrix.image }}
         run: |
           set -euo pipefail
           sha=sha-${GITHUB_SHA::7}
-          for name in api web; do
-            dir=$([ "$name" = api ] && echo server || echo client)
-            img=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/eth-explorer-$name
-            # source 라벨: 이 이미지가 어느 저장소에서 왔는지 GHCR 에 알려 준다 (저장소와 연결됨)
-            docker build "$dir" \
-              --label org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY} \
-              --label org.opencontainers.image.revision=${GITHUB_SHA} \
-              -t "$img:main" -t "$img:$sha"
-            docker push "$img:main"
-            docker push "$img:$sha"
-            echo "pushed $img:{main,$sha}" >> "$GITHUB_STEP_SUMMARY"
-          done
+          dir=$([ "$NAME" = api ] && echo server || echo client)
+          img=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/eth-explorer-$NAME
+          # source 라벨: 이 이미지가 어느 저장소에서 왔는지 GHCR 에 알려 준다 (저장소와 연결됨)
+          docker build "$dir" \
+            --label org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY} \
+            --label org.opencontainers.image.revision=${GITHUB_SHA} \
+            -t "$img:main" -t "$img:$sha"
+          docker push "$img:main"
+          docker push "$img:$sha"
+          echo "pushed $img:{main,$sha}" >> "$GITHUB_STEP_SUMMARY"
