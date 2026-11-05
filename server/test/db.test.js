@@ -41,6 +41,10 @@ function chain({ head, fork = 'a', forkFrom = Infinity, txsOf = () => [] }) {
       hash: hashOf(n),
       parentHash: hashOf(n - 1),
       timestamp: hex(1_700_000_000 + n * 12),
+      miner: '0x' + 'Cc'.repeat(20),
+      gasUsed: hex(21000 * 3),
+      gasLimit: hex(30_000_000),
+      baseFeePerGas: hex(7_000_000_000),
       transactions: txsOf(n).map((t, i) => ({ hash: h32(`${fork}f`, n * 1000 + i), transactionIndex: hex(i), ...t })),
     };
   return {
@@ -64,7 +68,7 @@ const syncAll = async (rpc, opts) => {
 test('migrate 는 여러 번 돌려도 같다', { skip }, async () => {
   await migrate(pool, () => {});
   const { rows } = await pool.query('SELECT count(*)::int AS n FROM schema_migrations');
-  assert.equal(rows[0].n, 1);
+  assert.equal(rows[0].n, 2); // 001_init, 002_explorer_columns
 });
 
 test('처음 켜면 보관 범위의 시작부터, 이후엔 이어서 쌓는다', { skip }, async () => {
@@ -109,6 +113,49 @@ test('주소별 목록: 보낸·받은·자기 자신, 최신순, 커서로 페�
   assert.equal(p2.nextCursor, null);
   assert.deepEqual(p2.items[0].blockNumber, '299');
   assert.equal(p2.items[0].txIndex, 1);
+});
+
+test('홈 화면용: 최신 블록·최신 tx·블록 안 tx·통계, 새 칸(miner·gas·method) 채움', { skip }, async () => {
+  await pool.query('TRUNCATE blocks CASCADE');
+  await syncAll(chain({
+    head: 50,
+    txsOf: (n) => [
+      { from: A, to: B, value: '0x1', input: '0x' },                          // 송금
+      { from: A, to: B, value: '0x0', input: '0xA9059CBB' + '00'.repeat(64) }, // transfer(…) 호출
+    ],
+  }), { retentionBlocks: 5 });
+
+  const blocks = await store.latestBlocks(2);
+  assert.deepEqual(blocks.map((b) => b.number), ['50', '49']);
+  assert.equal(blocks[0].miner, '0x' + 'cc'.repeat(20)); // 소문자로 저장
+  assert.equal(blocks[0].gasUsed, '63000');
+  assert.equal(blocks[0].baseFeePerGasWei, '7000000000');
+  assert.equal(blocks[0].txCount, 2);
+
+  const txs = await store.latestTxs(3);
+  assert.deepEqual(txs.map((t) => [t.blockNumber, t.txIndex, t.method]), [['50', 1, '0xa9059cbb'], ['50', 0, '0x'], ['49', 1, '0xa9059cbb']]);
+
+  const p1 = await store.listBlockTxs('50', { limit: 1 });
+  assert.deepEqual([p1.items[0].txIndex, p1.nextCursor], [1, '1']);
+  const p2 = await store.listBlockTxs('50', { limit: 1, before: 1 });
+  assert.deepEqual([p2.items[0].txIndex, p2.nextCursor], [0, null]);
+  assert.deepEqual((await store.listBlockTxs('999', { limit: 5 })).items, []);
+
+  // 테스트 블록 시각은 2023년이라 "최근 24시간" 통계는 0, 평균 블록 시간은 12초
+  assert.deepEqual(await store.stats(), { txs24h: '0', blocks24h: '0', avgBlockTimeSec: 12 });
+});
+
+test('블록 번호로 tx 를 찾을 때 색인(txs_block)을 쓴다 — 롤링 삭제가 전체를 훑지 않는다', { skip }, async () => {
+  // 통계가 갱신돼야 계획(plan)이 현실을 반영한다
+  await pool.query('ANALYZE txs');
+  await pool.query('SET enable_seqscan = off'); // 행이 적으면 원래 전체 훑기가 더 싸므로, "쓸 수 있는가"만 본다
+  try {
+    const { rows } = await pool.query("EXPLAIN SELECT 1 FROM txs WHERE block_number = 50");
+    const plan = rows.map((r) => r['QUERY PLAN']).join('\n');
+    assert.match(plan, /txs_block/, plan);
+  } finally {
+    await pool.query('RESET enable_seqscan');
+  }
 });
 
 test('prune: 보관 시간이 지난 블록과 그 tx 를 지운다', { skip }, async () => {

@@ -12,7 +12,7 @@
  *   - /v1 : 응답 모양을 깨는 변경이 필요해지면 /v2 를 새로 열고 v1 은 남겨 둔다.
  */
 import { getTx, getBlock, getAddress } from './explorer.js';
-import { isTxHash, isBlockId, isAddress, parseLimit, parseCursor } from './validate.js';
+import { isTxHash, isBlockId, isAddress, parseLimit, parseCursor, parseIndexCursor } from './validate.js';
 
 /** 경로 → 처리 함수 표. 새 API 는 여기에 한 줄 추가하는 것으로 끝난다. */
 const routes = [
@@ -20,6 +20,52 @@ const routes = [
     method: 'GET',
     path: /^\/api\/v1\/health$/,
     handle: ({ rpc, store }) => health(rpc, store),
+  },
+  {
+    // 홈 화면 통계 (DB). 24시간 tx 수, 평균 블록 시간 등
+    method: 'GET',
+    path: /^\/api\/v1\/stats$/,
+    handle: async ({ store }) => {
+      const [stats, coverage] = await Promise.all([store.stats(), store.coverage()]);
+      return [200, { ...stats, coverage }];
+    },
+  },
+  {
+    // 최신 블록 목록 (DB). 컬렉션 자원: /blocks  ↔  단건 자원: /blocks/{number}
+    method: 'GET',
+    path: /^\/api\/v1\/blocks$/,
+    handle: async ({ store }, _, query) => {
+      const limit = parseLimit(query.get('limit'), 10, 25);
+      if (limit === null) return [400, { error: 'invalid_limit' }];
+      return [200, { items: await store.latestBlocks(limit) }];
+    },
+  },
+  {
+    // 최신 tx 목록 (DB)
+    method: 'GET',
+    path: /^\/api\/v1\/txs$/,
+    handle: async ({ store }, _, query) => {
+      const limit = parseLimit(query.get('limit'), 10, 25);
+      if (limit === null) return [400, { error: 'invalid_limit' }];
+      return [200, { items: await store.latestTxs(limit) }];
+    },
+  },
+  {
+    // 블록 안의 tx 목록 (DB). 보관 범위 밖 블록이면 items 가 비고 coverage 로 범위를 알려 준다.
+    method: 'GET',
+    path: /^\/api\/v1\/blocks\/([^/]+)\/txs$/,
+    handle: async ({ store }, [id], query) => {
+      if (!isBlockId(id) || id === 'latest') return [400, { error: 'invalid_block_id' }];
+      const limit = parseLimit(query.get('limit'));
+      if (limit === null) return [400, { error: 'invalid_limit' }];
+      let before;
+      if (query.has('cursor')) {
+        before = parseIndexCursor(query.get('cursor'));
+        if (before === null) return [400, { error: 'invalid_cursor' }];
+      }
+      const [page, coverage] = await Promise.all([store.listBlockTxs(id, { limit, before }), store.coverage()]);
+      return [200, { blockNumber: id, ...page, coverage }];
+    },
   },
   {
     method: 'GET',

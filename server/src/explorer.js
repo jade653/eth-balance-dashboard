@@ -63,7 +63,11 @@ export async function getTx(rpc, hash) {
     gasLimit: dec(tx.gas),
     gasPriceWei: gasPrice.toString(),
     nonce: dec(tx.nonce),
+    position: dec(tx.transactionIndex),           // 블록 안에서 몇 번째 tx 인가
     type: Number(BigInt(tx.type ?? '0x0')),
+    // EIP-1559(type 2) tx 만 있는 값. 보낸 사람이 "최대 이만큼까지 내겠다"고 정한 상한이다.
+    maxFeePerGasWei: dec(tx.maxFeePerGas),
+    maxPriorityFeePerGasWei: dec(tx.maxPriorityFeePerGas),
     // input 이 0x 뿐이면 단순 송금, 아니면 컨트랙트 함수 호출
     input: tx.input,
     logCount: receipt.logs.length,

@@ -48,3 +48,26 @@ test('shortHex: 앞뒤만 남긴다', () => {
   assert.equal(shortHex(tx), '0xababab…ababab');
   assert.equal(shortHex('0x1234'), '0x1234');      // 짧으면 그대로
 });
+
+import { timeAgo, methodLabel, percent } from '../public/js/format.js';
+
+test('timeAgo: 초·분·시간·일', () => {
+  const now = Date.parse('2026-11-05T12:00:00Z');
+  assert.equal(timeAgo('2026-11-05T11:59:48Z', now), '12초 전');
+  assert.equal(timeAgo('2026-11-05T11:57:00Z', now), '3분 전');
+  assert.equal(timeAgo('2026-11-05T09:30:00Z', now), '2시간 30분 전');
+  assert.equal(timeAgo('2026-11-03T12:00:00Z', now), '2일 전');
+  assert.equal(timeAgo('2026-11-05T12:00:05Z', now), '0초 전'); // 시계가 살짝 앞서도 음수 안 됨
+});
+
+test('methodLabel: 아는 선택자는 이름, 모르면 선택자, 송금은 Transfer', () => {
+  assert.equal(methodLabel('0xA9059CBB'), 'Transfer');
+  assert.equal(methodLabel('0x'), 'Transfer');
+  assert.equal(methodLabel('0x12345678'), '0x12345678');
+  assert.equal(methodLabel(null), '-');
+});
+
+test('percent', () => {
+  assert.equal(percent('15000000', '30000000'), '50.00%');
+  assert.equal(percent('1', '0'), '-');
+});

@@ -30,12 +30,17 @@ export function isTxHash(v) {
   return typeof v === 'string' && TX_HASH_RE.test(v);
 }
 
-// 목록 API 의 페이지 크기. 없으면 25, 1~100 만 허용.
-export function parseLimit(v) {
-  if (v === null || v === undefined) return 25;
+// 목록 API 의 페이지 크기. 없으면 기본값(25), 1~max(100) 만 허용.
+export function parseLimit(v, dflt = 25, max = 100) {
+  if (v === null || v === undefined) return dflt;
   if (!/^\d{1,3}$/.test(v)) return null;
   const n = Number(v);
-  return n >= 1 && n <= 100 ? n : null;
+  return n >= 1 && n <= max ? n : null;
+}
+
+// 블록 안 tx 목록의 커서 = 블록 안 순서(tx_index) 하나. 틀리면 null.
+export function parseIndexCursor(v) {
+  return typeof v === 'string' && /^(0|[1-9]\d{0,5})$/.test(v) ? Number(v) : null;
 }
 
 // 페이지 커서 "<블록번호>-<블록 안 순서>" (응답의 nextCursor 를 그대로 돌려받는다). 틀리면 null.

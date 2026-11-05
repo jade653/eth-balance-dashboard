@@ -33,6 +33,10 @@ const fakeStore = {
   latestBlock: (...a) => store.latestBlock(...a),
   coverage: (...a) => (store.coverage ?? (async () => null))(...a),
   listAddressTxs: (...a) => store.listAddressTxs(...a),
+  latestBlocks: (...a) => store.latestBlocks(...a),
+  latestTxs: (...a) => store.latestTxs(...a),
+  listBlockTxs: (...a) => store.listBlockTxs(...a),
+  stats: (...a) => store.stats(...a),
 };
 
 let server;
@@ -113,7 +117,10 @@ test('GET /txs/{hash} → 채굴된 tx 의 정보 (숫자는 10진수 문자열)
     gasLimit: '21000',
     gasPriceWei: '1000000000',
     nonce: '5',
+    position: null,
     type: 2,
+    maxFeePerGasWei: null,
+    maxPriorityFeePerGasWei: null,
     input: '0x',
     logCount: 0,
   });
@@ -242,10 +249,46 @@ test('DB 가 죽으면 503 db_unavailable (RPC 장애와 구분된다)', async (
   assert.deepEqual(await res.json(), { error: 'db_unavailable' });
 });
 
+/* ── 홈 화면용 목록·통계 (DB) ─────────────────────────────────────────────── */
+
+test('GET /blocks, /txs → 최신 목록. limit 기본 10, 최대 25', async () => {
+  const seen = [];
+  store.latestBlocks = async (n) => { seen.push(['blocks', n]); return [{ number: '9' }]; };
+  store.latestTxs = async (n) => { seen.push(['txs', n]); return [{ hash: TX }]; };
+
+  assert.deepEqual(await (await get('/api/v1/blocks')).json(), { items: [{ number: '9' }] });
+  assert.deepEqual(await (await get('/api/v1/txs?limit=6')).json(), { items: [{ hash: TX }] });
+  assert.deepEqual(seen, [['blocks', 10], ['txs', 6]]);
+
+  assert.equal((await get('/api/v1/blocks?limit=26')).status, 400);
+  assert.equal((await get('/api/v1/txs?limit=0')).status, 400);
+});
+
+test('GET /stats → 통계 + 보관 범위', async () => {
+  store.stats = async () => ({ txs24h: '1500000', blocks24h: '7200', avgBlockTimeSec: 12 });
+  store.coverage = async () => ({ fromBlock: '1', toBlock: '2', fromTime: 'a', toTime: 'b' });
+  const body = await (await get('/api/v1/stats')).json();
+  assert.equal(body.txs24h, '1500000');
+  assert.equal(body.coverage.toBlock, '2');
+});
+
+test('GET /blocks/{n}/txs → 블록 안 목록, 커서는 블록 안 순서', async () => {
+  let seen;
+  store.listBlockTxs = async (n, opts) => { seen = [n, opts]; return { items: [], nextCursor: null }; };
+  const res = await get('/api/v1/blocks/16/txs?limit=5&cursor=40');
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, ['16', { limit: 5, before: 40 }]);
+  assert.equal((await res.json()).blockNumber, '16');
+
+  for (const bad of ['/api/v1/blocks/latest/txs', '/api/v1/blocks/0x10/txs', '/api/v1/blocks/16/txs?cursor=1-2']) {
+    assert.equal((await get(bad)).status, 400, bad);
+  }
+});
+
 /* ── 공통 ───────────────────────────────────────────────────────────────── */
 
 test('없는 경로 → 404, 있는 경로에 틀린 메서드 → 405 + Allow', async () => {
-  for (const path of ['/', '/api/health', '/api/v1/nope', '/api/v1/txs', `/api/v1/txs/${TX}/extra`]) {
+  for (const path of ['/', '/api/health', '/api/v1/nope', '/api/v1/tx', `/api/v1/txs/${TX}/extra`]) {
     assert.equal((await get(path)).status, 404, path);
   }
   const res = await get(`/api/v1/txs/${TX}`, { method: 'DELETE' });

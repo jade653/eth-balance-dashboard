@@ -7,19 +7,37 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header>
-    <a href="#/" class="brand">ETH Explorer</a>
-    <span id="status" class="status">확인 중…</span>
+  <!-- 상단 바: 로고 · (홈이 아닐 때) 검색창 · 메뉴 · 연결 상태 -->
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a href="#/" class="brand" aria-label="ETH Explorer 홈">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2 5 12.2 12 16l7-3.8L12 2Zm0 15.6-7-3.9L12 22l7-8.3-7 3.9Z" fill="currentColor"/>
+        </svg>
+        <span>ETH Explorer</span>
+      </a>
+      <form id="top-search" class="search search-sm" autocomplete="off" hidden>
+        <input name="q" type="search" spellcheck="false" placeholder="주소 / tx 해시 / 블록 번호로 검색" aria-label="검색">
+        <button type="submit" aria-label="검색">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 3.9 10.6l5.2 5.2 1.4-1.4-5.2-5.2A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" fill="currentColor"/></svg>
+        </button>
+      </form>
+      <nav class="nav">
+        <a href="#/">홈</a>
+        <a href="#/blocks">블록</a>
+        <a href="#/txs">트랜잭션</a>
+      </nav>
+      <span id="status" class="status">연결 확인 중…</span>
+    </div>
   </header>
 
-  <form id="search" autocomplete="off">
-    <input id="q" name="q" type="search" spellcheck="false"
-           placeholder="tx 해시 · 주소 · 블록 번호" aria-label="검색">
-    <button type="submit">검색</button>
-  </form>
-  <p id="search-error" class="error" hidden></p>
-
   <main id="view"></main>
+
+  <footer class="footer">
+    <div class="container">
+      이더리움 메인넷 · 단건 조회는 노드(JSON-RPC)에 직접, 목록은 자체 인덱서(최근 24시간)에서 가져옵니다.
+    </div>
+  </footer>
 
   <script type="module" src="/js/main.js"></script>
 </body>

@@ -61,6 +61,28 @@ export async function migrate(pool, log = console.log) {
 }
 
 const iso = (d) => (d ? d.toISOString() : null);
+const dec = (hex) => (hex == null ? null : BigInt(hex).toString());
+
+/** input 의 앞 4바이트 = 호출한 함수의 선택자. 단순 송금(0x)이면 '0x' */
+const methodOf = (input) => (typeof input === 'string' && input.length >= 10 ? input.slice(0, 10).toLowerCase() : '0x');
+
+/** txs 행 → API 응답 모양. addr 를 주면 그 주소 기준 방향(in/out/self)을 붙인다 */
+function txRow(r, addr) {
+  const item = {
+    hash: r.hash,
+    blockNumber: r.block_number,
+    txIndex: r.tx_index,
+    timestamp: iso(r.ts),
+    from: r.from_addr,
+    to: r.to_addr,
+    valueWei: r.value_wei,
+    method: r.method, // 이 칸이 생기기 전(002 이전)에 쌓인 행은 null
+  };
+  if (addr) item.direction = r.from_addr === addr ? (r.to_addr === addr ? 'self' : 'out') : 'in';
+  return item;
+}
+
+const TX_COLS = 'hash, block_number, tx_index, from_addr, to_addr, value_wei, ts, method';
 
 export function createStore(pool) {
   return {
@@ -82,16 +104,19 @@ export function createStore(pool) {
       try {
         await client.query('BEGIN');
         await client.query(
-          `INSERT INTO blocks (number, hash, parent_hash, ts, tx_count)
-           VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-          [BigInt(b.number).toString(), b.hash, b.parentHash, ts, txs.length],
+          `INSERT INTO blocks (number, hash, parent_hash, ts, tx_count, miner, gas_used, gas_limit, base_fee)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
+          [
+            BigInt(b.number).toString(), b.hash, b.parentHash, ts, txs.length,
+            b.miner?.toLowerCase() ?? null, dec(b.gasUsed), dec(b.gasLimit), dec(b.baseFeePerGas),
+          ],
         );
         if (txs.length > 0) {
           // tx 수백 개를 INSERT 한 번으로: 열마다 배열을 넘기고 unnest 로 행으로 편다
           await client.query(
-            `INSERT INTO txs (hash, block_number, tx_index, from_addr, to_addr, value_wei, ts)
-             SELECT h, $2, i, f, t, v, $3
-               FROM unnest($1::text[], $4::int[], $5::text[], $6::text[], $7::numeric[]) AS x(h, i, f, t, v)
+            `INSERT INTO txs (hash, block_number, tx_index, from_addr, to_addr, value_wei, ts, method)
+             SELECT h, $2, i, f, t, v, $3, m
+               FROM unnest($1::text[], $4::int[], $5::text[], $6::text[], $7::numeric[], $8::text[]) AS x(h, i, f, t, v, m)
              ON CONFLICT DO NOTHING`,
             [
               txs.map((t) => t.hash),
@@ -101,6 +126,7 @@ export function createStore(pool) {
               txs.map((t) => t.from.toLowerCase()),
               txs.map((t) => t.to?.toLowerCase() ?? null),
               txs.map((t) => BigInt(t.value).toString()),
+              txs.map((t) => methodOf(t.input)),
             ],
           );
         }
@@ -152,7 +178,7 @@ export function createStore(pool) {
       // before 가 없으면 "아주 큰 값"에서 시작 = 최신부터
       const [bBlock, bIndex] = before ?? ['9223372036854775807', 2147483647];
       const { rows } = await pool.query(
-        `SELECT hash, block_number, tx_index, from_addr, to_addr, value_wei, ts FROM (
+        `SELECT ${TX_COLS} FROM (
            (SELECT * FROM txs WHERE from_addr = $1 AND (block_number, tx_index) < ($2, $3)
              ORDER BY block_number DESC, tx_index DESC LIMIT $4)
            UNION ALL
@@ -165,17 +191,71 @@ export function createStore(pool) {
       const page = rows.slice(0, limit);
       const last = page.at(-1);
       return {
-        items: page.map((r) => ({
-          hash: r.hash,
-          blockNumber: r.block_number,
-          txIndex: r.tx_index,
-          timestamp: iso(r.ts),
-          from: r.from_addr,
-          to: r.to_addr,
-          valueWei: r.value_wei,
-          direction: r.from_addr === addr ? (r.to_addr === addr ? 'self' : 'out') : 'in',
-        })),
+        items: page.map((r) => txRow(r, addr)),
         nextCursor: rows.length > limit ? `${last.block_number}-${last.tx_index}` : null,
+      };
+    },
+
+    /** 최신 블록 N개 (홈 화면 "최신 블록") */
+    async latestBlocks(limit) {
+      const { rows } = await pool.query(
+        `SELECT number, hash, ts, tx_count, miner, gas_used, gas_limit, base_fee
+           FROM blocks ORDER BY number DESC LIMIT $1`,
+        [limit],
+      );
+      return rows.map((r) => ({
+        number: r.number,
+        hash: r.hash,
+        timestamp: iso(r.ts),
+        txCount: r.tx_count,
+        miner: r.miner,
+        gasUsed: r.gas_used,
+        gasLimit: r.gas_limit,
+        baseFeePerGasWei: r.base_fee,
+      }));
+    },
+
+    /** 최신 tx N개 (홈 화면 "최신 트랜잭션"). txs_block 색인을 앞에서부터 N개만 읽는다 */
+    async latestTxs(limit) {
+      const { rows } = await pool.query(
+        `SELECT ${TX_COLS} FROM txs ORDER BY block_number DESC, tx_index DESC LIMIT $1`,
+        [limit],
+      );
+      return rows.map((r) => txRow(r));
+    },
+
+    /** 블록 안의 tx (블록 화면의 표). 보관 범위 밖 블록이면 빈 목록 */
+    async listBlockTxs(number, { limit, before }) {
+      const bIndex = before ?? 2147483647;
+      const { rows } = await pool.query(
+        `SELECT ${TX_COLS} FROM txs WHERE block_number = $1 AND tx_index < $2
+          ORDER BY tx_index DESC LIMIT $3`,
+        [String(number), bIndex, limit + 1],
+      );
+      const page = rows.slice(0, limit);
+      return {
+        items: page.map((r) => txRow(r)),
+        nextCursor: rows.length > limit ? String(page.at(-1).tx_index) : null,
+      };
+    },
+
+    /**
+     * 홈 화면 통계. 전부 blocks 표(하루 약 7,200행)만 본다 — txs 표(하루 약 150만 행)를
+     * count(*) 하면 요청마다 느려지므로, 블록마다 미리 적어 둔 tx_count 를 더한다.
+     */
+    async stats() {
+      const { rows } = await pool.query(
+        `SELECT
+           (SELECT coalesce(sum(tx_count), 0) FROM blocks WHERE ts > now() - interval '24 hours') AS txs_24h,
+           (SELECT count(*) FROM blocks WHERE ts > now() - interval '24 hours') AS blocks_24h,
+           (SELECT extract(epoch FROM max(ts) - min(ts)) / nullif(count(*) - 1, 0)
+              FROM (SELECT ts FROM blocks ORDER BY number DESC LIMIT 100) t) AS avg_block_time`,
+      );
+      const r = rows[0];
+      return {
+        txs24h: String(r.txs_24h),
+        blocks24h: String(r.blocks_24h),
+        avgBlockTimeSec: r.avg_block_time == null ? null : Number(Number(r.avg_block_time).toFixed(1)),
       };
     },
   };

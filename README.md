@@ -105,7 +105,11 @@ cd server && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:5432/postgres 
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/v1/health` | 서버·RPC 상태 |
+| GET | `/api/v1/health` | 서버·RPC 상태 + 인덱서 범위·지연 |
+| GET | `/api/v1/stats` | 홈 통계: 24시간 tx 수, 평균 블록 시간 (DB) |
+| GET | `/api/v1/blocks?limit=` | 최신 블록 목록 (DB, 최대 25) |
+| GET | `/api/v1/txs?limit=` | 최신 tx 목록 (DB, 최대 25) |
+| GET | `/api/v1/blocks/{number}/txs?limit=&cursor=` | 블록 안의 tx 목록 (DB) |
 | GET | `/api/v1/txs/{hash}` | tx 상세: 성공/실패, 보낸·받는 주소, 금액, 수수료, 블록·시각 |
 | GET | `/api/v1/blocks/{number\|latest}` | 블록 상세 + 포함된 tx 해시 목록 |
 | GET | `/api/v1/addresses/{address}` | 잔액, nonce, EOA/컨트랙트 구분 |
