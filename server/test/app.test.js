@@ -123,7 +123,48 @@ test('GET /txs/{hash} → 채굴된 tx 의 정보 (숫자는 10진수 문자열)
     maxPriorityFeePerGasWei: null,
     input: '0x',
     logCount: 0,
+    tokenTransfers: [],
   });
+});
+
+test('토큰 송금 tx: to 는 토큰 컨트랙트, 실제 받는 사람은 Transfer 로그에서', async () => {
+  const TOKEN = '0x' + '33'.repeat(20);
+  const OTHER = '0x' + '44'.repeat(20);
+  const RECIPIENT = '0x92d0a3c5d5f086db2c94ded1cfac0e0c1798fb16';
+  const pad = (a) => '0x' + '0'.repeat(24) + a.slice(2);
+  const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+  const word = (n) => '0x' + n.toString(16).padStart(64, '0');
+  const logs = [
+    { address: TOKEN, topics: [TRANSFER, pad(ADDR), pad(RECIPIENT)], data: word(1500000n) },     // ERC-20
+    { address: OTHER, topics: [TRANSFER, pad(ADDR), pad(TO), word(7n)], data: '0x' },          // ERC-721 → 제외
+    { address: OTHER, topics: ['0x' + '00'.repeat(32)], data: '0x' },                          // 다른 이벤트 → 제외
+  ];
+  // symbol() 은 ABI string "USDT", decimals() 는 6
+  const usdt = '0x' + word(32n).slice(2) + word(4n).slice(2) + Buffer.from('USDT').toString('hex').padEnd(64, '0');
+  node = {
+    eth_getTransactionByHash: () => ({ ...minedTx, to: TOKEN, value: '0x0', input: '0xa9059cbb' + pad(RECIPIENT).slice(2) + word(1500000n).slice(2) }),
+    eth_getTransactionReceipt: () => ({ ...receipt, logs }),
+    eth_getBlockByNumber: () => ({ timestamp: '0x0' }),
+    eth_call: ({ to, data }) => (to !== TOKEN ? new Error('revert') : data === '0x95d89b41' ? usdt : word(6n)),
+  };
+  const body = await (await get(`/api/v1/txs/${TX}`)).json();
+  assert.equal(body.to, TOKEN);
+  assert.equal(body.logCount, 3);
+  assert.deepEqual(body.tokenTransfers, [{ token: TOKEN, from: ADDR, to: RECIPIENT, amount: '1500000', symbol: 'USDT', decimals: 6 }]);
+});
+
+test('symbol()/decimals() 가 실패하는 토큰도 전송 자체는 보여준다', async () => {
+  const TOKEN = '0x' + '33'.repeat(20);
+  const pad = (a) => '0x' + '0'.repeat(24) + a.slice(2);
+  const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+  node = {
+    eth_getTransactionByHash: () => minedTx,
+    eth_getTransactionReceipt: () => ({ ...receipt, logs: [{ address: TOKEN, topics: [TRANSFER, pad(ADDR), pad(TO)], data: '0x' + '0'.repeat(63) + '9' }] }),
+    eth_getBlockByNumber: () => ({ timestamp: '0x0' }),
+    eth_call: () => new Error('execution reverted'),
+  };
+  const body = await (await get(`/api/v1/txs/${TX}`)).json();
+  assert.deepEqual(body.tokenTransfers, [{ token: TOKEN, from: ADDR, to: TO, amount: '9', symbol: null, decimals: null }]);
 });
 
 test('실패한 tx 는 status=failed', async () => {

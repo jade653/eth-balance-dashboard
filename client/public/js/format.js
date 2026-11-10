@@ -19,11 +19,19 @@ export function formatInteger(decimalString) {
  * 반올림하지 않고 자른다 — 잔액을 실제보다 크게 보여주는 쪽으로 틀리면 안 된다.
  */
 export function weiToEth(wei, maxFraction = 6) {
-  const v = BigInt(wei);
-  if (v < 0n) throw new RangeError('음수 wei');
-  const WEI = 10n ** 18n;
-  const whole = v / WEI;
-  const frac = (v % WEI).toString().padStart(18, '0').slice(0, maxFraction).replace(/0+$/, '');
+  return formatUnits(wei, 18, maxFraction);
+}
+
+/**
+ * 소수점 없는 정수 금액 → decimals 자리에 소수점을 찍은 문자열. 토큰마다 decimals 가 다르다
+ * (ETH·대부분 토큰 18, USDT·USDC 6, WBTC 8). weiToEth 와 같은 규칙: 자르고, 꼬리 0 을 지운다.
+ */
+export function formatUnits(raw, decimals, maxFraction = 6) {
+  const v = BigInt(raw);
+  if (v < 0n) throw new RangeError('음수 금액');
+  const unit = 10n ** BigInt(decimals);
+  const whole = v / unit;
+  const frac = decimals === 0 ? '' : (v % unit).toString().padStart(decimals, '0').slice(0, maxFraction).replace(/0+$/, '');
   return frac ? `${formatInteger(whole.toString())}.${frac}` : formatInteger(whole.toString());
 }
 

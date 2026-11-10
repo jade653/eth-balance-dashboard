@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatInteger, weiToEth, shortHex, routeForQuery } from '../public/js/format.js';
+import { formatInteger, weiToEth, formatUnits, shortHex, routeForQuery } from '../public/js/format.js';
 
 test('routeForQuery: 입력 모양으로 화면을 고른다', () => {
   const tx = '0x' + 'ab'.repeat(32);
@@ -80,4 +80,11 @@ test('formatGasPrice: Gwei 로 0 이 되는 작은 값은 wei 로', () => {
   assert.equal(formatGasPrice('99999'), '99,999 wei');      // 그보다 작으면 wei
   assert.equal(formatGasPrice('7'), '7 wei');               // Mustsem base fee 0x7
   assert.equal(formatGasPrice('0'), '0 Gwei');              // 진짜 0 은 0
+});
+
+test('formatUnits: 토큰마다 다른 decimals', () => {
+  assert.equal(formatUnits('1500000', 6), '1.5');               // USDT 1.5
+  assert.equal(formatUnits('123456789', 8, 8), '1.23456789');   // WBTC
+  assert.equal(formatUnits('1000', 0), '1,000');                // 소수점 없는 토큰
+  assert.equal(formatUnits('1234567000000000000000', 18), '1,234.567');
 });

@@ -9,7 +9,7 @@
  * 화면 전환은 URL 의 # 뒤로 한다. 서버(nginx)는 언제나 index.html 하나만 주면 된다.
  * 체인에서 온 값은 전부 textContent 로만 넣는다 (innerHTML 금지 → XSS 차단).
  */
-import { formatInteger, weiToEth, shortHex, routeForQuery, timeAgo, methodLabel, percent, formatGasPrice } from './format.js';
+import { formatInteger, weiToEth, formatUnits, shortHex, routeForQuery, timeAgo, methodLabel, percent, formatGasPrice } from './format.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -356,6 +356,17 @@ async function txsView() {
 
 const TX_TYPE = { 0: '0 (Legacy)', 1: '1 (EIP-2930)', 2: '2 (EIP-1559)', 3: '3 (EIP-4844 Blob)', 4: '4 (EIP-7702)' };
 
+/** "보낸 0xab…  받은 0xcd…  100.5 USDT" 한 줄. decimals 를 모르면 소수점 없이 원래 정수를 보여준다 */
+function tokenTransferRow(x) {
+  const amount = x.decimals != null ? formatUnits(x.amount, x.decimals, 6) : formatInteger(x.amount);
+  const name = x.symbol ?? shortHex(x.token, 6);
+  return h('div', { class: 'token-transfer' },
+    h('span', { class: 'muted' }, '보냄 '), addrLink(x.from, 6),
+    h('span', { class: 'muted' }, ' 받음 '), addrLink(x.to, 6),
+    h('span', { class: 'muted' }, ' 금액 '), `${amount} `,
+    link(`#/address/${x.token}`, name, x.symbol ? null : 'mono'));
+}
+
 async function txView(hash) {
   const [t, health] = await Promise.all([api(`/txs/${hash}`), api('/health').catch(() => null)]);
   const confirmations = t.blockNumber && health ? BigInt(health.block) - BigInt(t.blockNumber) + 1n : null;
@@ -370,9 +381,14 @@ async function txView(hash) {
     ['시각', '블록이 만들어진 시각', t.timestamp ? h('span', {}, age(t.timestamp), h('span', { class: 'muted' }, ` (${localTime(t.timestamp)})`)) : undefined],
     'hr',
     ['보낸 주소', '트랜잭션에 서명한 주소', h('span', {}, link(`#/address/${t.from}`, t.from, 'mono'), copyBtn(t.from))],
+    // Etherscan 처럼: 컨트랙트 함수를 부른 tx 의 to 는 "받는 사람"이 아니라 "호출한 컨트랙트"다
     t.to
-      ? ['받는 주소', '받는 주소 또는 호출한 컨트랙트', h('span', {}, link(`#/address/${t.to}`, t.to, 'mono'), copyBtn(t.to))]
+      ? [t.input && t.input !== '0x' ? '호출한 컨트랙트 (To)' : '받는 주소',
+        '트랜잭션의 to. 토큰 송금이면 토큰 컨트랙트이고, 토큰을 실제로 받은 주소는 아래 "토큰 전송"에 있다',
+        h('span', {}, link(`#/address/${t.to}`, t.to, 'mono'), copyBtn(t.to))]
       : ['받는 주소', '받는 주소가 없으면 컨트랙트 생성', h('span', {}, '[컨트랙트 생성] ', t.contractCreated ? link(`#/address/${t.contractCreated}`, t.contractCreated, 'mono') : '-')],
+    ['토큰 전송', 'ERC-20 Transfer 이벤트 로그로 확인한 토큰 이동 (보낸 주소 → 받는 주소, 금액)',
+      t.tokenTransfers?.length ? h('div', { class: 'token-transfers' }, t.tokenTransfers.map(tokenTransferRow)) : undefined],
     'hr',
     ['금액', '보낸 기본 코인. 토큰 전송은 여기가 0 이고 이벤트 로그에 담긴다', eth(t.valueWei)],
     ['트랜잭션 수수료', '실제 사용한 가스 × 가스 가격', t.feeWei ? eth(t.feeWei) : undefined],
