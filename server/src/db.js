@@ -102,6 +102,7 @@ export function createStore(pool) {
     /** 인덱서 데이터를 전부 지운다 (체인을 바꿀 때). meta 도 비운다 */
     async resetAll() {
       await pool.query('TRUNCATE blocks CASCADE');
+      await pool.query('TRUNCATE tokens CASCADE');
       await pool.query('DELETE FROM meta');
     },
 
@@ -277,5 +278,268 @@ export function createStore(pool) {
         avgBlockTimeSec: r.avg_block_time == null ? null : Number(Number(r.avg_block_time).toFixed(1)),
       };
     },
+
+    /* ── 토큰 (홀더 추적) ─────────────────────────────────────────────── */
+
+    /**
+     * 추적할 토큰을 등록한다. 이미 있으면 이름·심볼·소수점만 새로 고친다 —
+     * 어디까지 모았나(synced_block)와 시작 블록은 건드리지 않는다 (재시작해도 이어서 모은다).
+     */
+    async upsertToken({ address, name, symbol, decimals, startBlock }) {
+      await pool.query(
+        `INSERT INTO tokens (address, name, symbol, decimals, start_block) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (address) DO UPDATE SET name = EXCLUDED.name, symbol = EXCLUDED.symbol, decimals = EXCLUDED.decimals`,
+        [address.toLowerCase(), name, symbol, decimals, String(startBlock)],
+      );
+    },
+
+    async listTokens() {
+      const { rows } = await pool.query(`SELECT ${TOKEN_COLS} FROM tokens ORDER BY holder_count DESC, address`);
+      return rows.map(tokenRow);
+    },
+
+    /** 추적 중인 토큰 하나. 추적 대상이 아니면 null */
+    async getToken(address) {
+      const { rows } = await pool.query(`SELECT ${TOKEN_COLS} FROM tokens WHERE address = $1`, [address.toLowerCase()]);
+      return rows[0] ? tokenRow(rows[0]) : null;
+    },
+
+    /**
+     * 블록 구간 하나의 Transfer 들을 반영한다. 전송 기록 · 잔액 · "여기까지 모았다"를 한 트랜잭션으로.
+     * 중간에 죽으면 셋 다 없던 일이 되므로, 같은 구간을 다시 넣어도 잔액이 두 번 더해지지 않는다.
+     *
+     * 잔액은 SQL 에서 더하지 않고 JS(BigInt)에서 계산해 절대값으로 쓴다. 그래야 "0 → 양수"(새 홀더),
+     * "양수 → 0"(떠난 홀더)을 알 수 있어 holder_count 를 count(*) 없이 맞게 유지한다.
+     * 이 표에 쓰는 건 worker 하나뿐이라 읽고-계산하고-쓰는 사이에 끼어들 쓰기가 없다.
+     *
+     * 0x000…0 은 잔액을 세지 않는다: 발행(from=0)·소각(to=0)의 상대편일 뿐 실제 보유자가 아니다.
+     */
+    async applyTokenTransfers(token, transfers, toBlock) {
+      const t = token.toLowerCase();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        let holderDelta = 0;
+        if (transfers.length > 0) {
+          await client.query(
+            `INSERT INTO token_transfers (token, block_number, log_index, tx_hash, tx_index, from_addr, to_addr, amount, ts, method)
+             SELECT $1, b, l, h, i, f, o, a, s, m
+               FROM unnest($2::bigint[], $3::int[], $4::text[], $5::int[], $6::text[], $7::text[], $8::numeric[], $9::timestamptz[], $10::text[])
+                 AS x(b, l, h, i, f, o, a, s, m)
+             ON CONFLICT DO NOTHING`,
+            [
+              t,
+              transfers.map((x) => x.blockNumber),
+              transfers.map((x) => x.logIndex),
+              transfers.map((x) => x.txHash),
+              transfers.map((x) => x.txIndex),
+              transfers.map((x) => x.from),
+              transfers.map((x) => x.to),
+              transfers.map((x) => x.amount),
+              transfers.map((x) => x.timestamp ?? null),
+              transfers.map((x) => x.method ?? null),
+            ],
+          );
+
+          const delta = new Map();
+          const add = (addr, v) => { if (addr !== ZERO_ADDR) delta.set(addr, (delta.get(addr) ?? 0n) + v); };
+          for (const x of transfers) {
+            const v = BigInt(x.amount);
+            add(x.from, -v);
+            add(x.to, v);
+          }
+          const holders = [...delta.keys()];
+          const { rows } = await client.query(
+            'SELECT holder, balance FROM token_balances WHERE token = $1 AND holder = ANY($2::text[])',
+            [t, holders],
+          );
+          const old = new Map(rows.map((r) => [r.holder, BigInt(r.balance)]));
+
+          const upHolders = [];
+          const upBalances = [];
+          const gone = [];
+          for (const [h, d] of delta) {
+            if (d === 0n) continue;
+            const before = old.get(h) ?? 0n;
+            const after = before + d;
+            holderDelta += (after > 0n ? 1 : 0) - (before > 0n ? 1 : 0);
+            if (after === 0n) gone.push(h);
+            else { upHolders.push(h); upBalances.push(after.toString()); }
+          }
+          if (upHolders.length) {
+            await client.query(
+              `INSERT INTO token_balances (token, holder, balance)
+               SELECT $1, h, b FROM unnest($2::text[], $3::numeric[]) AS x(h, b)
+               ON CONFLICT (token, holder) DO UPDATE SET balance = EXCLUDED.balance`,
+              [t, upHolders, upBalances],
+            );
+          }
+          if (gone.length) {
+            await client.query('DELETE FROM token_balances WHERE token = $1 AND holder = ANY($2::text[])', [t, gone]);
+          }
+        }
+        await client.query(
+          `UPDATE tokens SET synced_block = $2, holder_count = holder_count + $3,
+                  transfer_count = transfer_count + $4, updated_at = now()
+            WHERE address = $1`,
+          [t, String(toBlock), holderDelta, transfers.length],
+        );
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    /** 홀더 순위 (잔액 큰 순). offset 페이지 — Etherscan 처럼 "N 페이지 중 M" 으로 넘긴다 */
+    async tokenHolders(token, { limit, offset }) {
+      const { rows } = await pool.query(
+        `SELECT holder, balance FROM token_balances WHERE token = $1 AND balance > 0
+          ORDER BY balance DESC, holder LIMIT $2 OFFSET $3`,
+        [token.toLowerCase(), limit, offset],
+      );
+      return rows.map((r, i) => ({ rank: offset + i + 1, address: r.holder, balance: r.balance }));
+    },
+
+    /** 전체 홀더 (CSV 내려받기용) */
+    async allTokenHolders(token) {
+      const { rows } = await pool.query(
+        'SELECT holder, balance FROM token_balances WHERE token = $1 AND balance > 0 ORDER BY balance DESC, holder',
+        [token.toLowerCase()],
+      );
+      return rows.map((r, i) => ({ rank: i + 1, address: r.holder, balance: r.balance }));
+    },
+
+    /**
+     * 홀더 분포 요약 (Etherscan 의 Holders Overview).
+     *   top5 … top100 : 상위 N 명이 가진 합
+     *   weighted      : Σ(순위 × 잔액). 지니 계수 = (n+1)/n − 2·weighted/(n·total)  (순위는 큰 쪽부터 1)
+     *   magnitudes    : 잔액 자릿수(10^k) 별 주소 수. 화면이 decimals 를 빼서 "N 개 이상 가진 지갑 수"를 만든다
+     */
+    async tokenHolderSummary(token) {
+      const t = token.toLowerCase();
+      const [{ rows: [s] }, { rows: mags }] = await Promise.all([
+        pool.query(
+          `WITH r AS (
+             SELECT balance, row_number() OVER (ORDER BY balance DESC, holder) AS rn
+               FROM token_balances WHERE token = $1 AND balance > 0)
+           SELECT count(*) AS n, coalesce(sum(balance), 0) AS total,
+                  coalesce(sum(balance) FILTER (WHERE rn <= 5), 0)   AS top5,
+                  coalesce(sum(balance) FILTER (WHERE rn <= 10), 0)  AS top10,
+                  coalesce(sum(balance) FILTER (WHERE rn <= 25), 0)  AS top25,
+                  coalesce(sum(balance) FILTER (WHERE rn <= 50), 0)  AS top50,
+                  coalesce(sum(balance) FILTER (WHERE rn <= 100), 0) AS top100,
+                  coalesce(sum(rn * balance), 0) AS weighted,
+                  (SELECT count(*) FROM r WHERE balance * 100 >= (SELECT sum(balance) FROM r)) AS over1pct
+             FROM r`,
+          [t],
+        ),
+        pool.query(
+          `SELECT floor(log(balance))::int AS mag, count(*) AS n
+             FROM token_balances WHERE token = $1 AND balance > 0 GROUP BY 1 ORDER BY 1`,
+          [t],
+        ),
+      ]);
+      const str = (v) => BigInt(String(v).split('.')[0]).toString(); // numeric 합계 → 정수 문자열
+      return {
+        holders: Number(s.n),
+        totalHeld: str(s.total),
+        top5: str(s.top5), top10: str(s.top10), top25: str(s.top25), top50: str(s.top50), top100: str(s.top100),
+        weighted: str(s.weighted),
+        over1pct: Number(s.over1pct), // 전체 보유량의 1% 이상을 가진 주소 수
+        magnitudes: mags.map((m) => ({ magnitude: m.mag, count: Number(m.n) })),
+      };
+    },
+
+    /** 한 주소가 한 토큰을 얼마나 갖고 있나 (토큰 페이지의 "홀더로 거르기") */
+    async tokenBalanceOf(token, holder) {
+      const { rows } = await pool.query(
+        'SELECT balance FROM token_balances WHERE token = $1 AND holder = $2',
+        [token.toLowerCase(), holder.toLowerCase()],
+      );
+      return rows[0]?.balance ?? '0';
+    },
+
+    /**
+     * 토큰 전송 목록 (최신순, 커서 = "블록-로그순서").
+     *   token  만 주면: 그 토큰의 전체 전송
+     *   holder 만 주면: 그 주소가 보내거나 받은, 추적 중인 모든 토큰의 전송 (주소 페이지)
+     *   둘 다 주면    : 그 토큰에서 그 주소의 전송 (토큰 페이지의 홀더 거르기)
+     */
+    async listTokenTransfers({ token, holder, limit, before }) {
+      const t = token?.toLowerCase() ?? null;
+      const h = holder?.toLowerCase() ?? null;
+      const [bBlock, bIndex] = before ?? ['9223372036854775807', 2147483647];
+      const cols = `x.token, x.block_number, x.log_index, x.tx_hash, x.from_addr, x.to_addr, x.amount, x.ts, x.method,
+                    k.name, k.symbol, k.decimals`;
+      const page = 'ORDER BY block_number DESC, log_index DESC LIMIT $5';
+      const sql = h
+        ? `SELECT ${cols} FROM (
+             (SELECT * FROM token_transfers WHERE from_addr = $2 AND ($1::text IS NULL OR token = $1)
+                AND (block_number, log_index) < ($3, $4) ${page})
+             UNION ALL
+             (SELECT * FROM token_transfers WHERE to_addr = $2 AND from_addr <> $2 AND ($1::text IS NULL OR token = $1)
+                AND (block_number, log_index) < ($3, $4) ${page})
+           ) x JOIN tokens k ON k.address = x.token
+           ORDER BY x.block_number DESC, x.log_index DESC LIMIT $5`
+        : `SELECT ${cols} FROM token_transfers x JOIN tokens k ON k.address = x.token
+            WHERE x.token = $1 AND $2::text IS NULL AND (x.block_number, x.log_index) < ($3, $4)
+            ORDER BY x.block_number DESC, x.log_index DESC LIMIT $5`;
+      const { rows } = await pool.query(sql, [t, h, bBlock, bIndex, limit + 1]);
+      const items = rows.slice(0, limit);
+      const last = items.at(-1);
+      return {
+        items: items.map((r) => {
+          const item = {
+            token: r.token,
+            tokenName: r.name,
+            tokenSymbol: r.symbol,
+            tokenDecimals: r.decimals,
+            txHash: r.tx_hash,
+            blockNumber: r.block_number,
+            logIndex: r.log_index,
+            timestamp: iso(r.ts),
+            from: r.from_addr,
+            to: r.to_addr,
+            amount: r.amount,
+            method: r.method,
+          };
+          if (h) item.direction = r.from_addr === h ? (r.to_addr === h ? 'self' : 'out') : 'in';
+          return item;
+        }),
+        nextCursor: rows.length > limit ? `${last.block_number}-${last.log_index}` : null,
+      };
+    },
+
+    /** 주소가 가진 (추적 중인) 토큰들. 주소 페이지의 "토큰 보유" */
+    async addressTokenBalances(address) {
+      const { rows } = await pool.query(
+        `SELECT k.address, k.name, k.symbol, k.decimals, b.balance
+           FROM token_balances b JOIN tokens k ON k.address = b.token
+          WHERE b.holder = $1 AND b.balance > 0 ORDER BY k.symbol, k.address`,
+        [address.toLowerCase()],
+      );
+      return rows.map((r) => ({ token: r.address, name: r.name, symbol: r.symbol, decimals: r.decimals, balance: r.balance }));
+    },
+  };
+}
+
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+
+const TOKEN_COLS = 'address, name, symbol, decimals, start_block, synced_block, holder_count, transfer_count, updated_at';
+
+function tokenRow(r) {
+  return {
+    address: r.address,
+    name: r.name,
+    symbol: r.symbol,
+    decimals: r.decimals,
+    startBlock: r.start_block,
+    syncedBlock: r.synced_block,
+    holders: r.holder_count,
+    transfers: String(r.transfer_count),
+    updatedAt: iso(r.updated_at),
   };
 }

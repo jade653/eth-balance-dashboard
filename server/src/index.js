@@ -22,9 +22,10 @@ const rpc = new RpcClient(RPC_URLS);
 // DB 는 선택이다. 없으면 tx·블록·주소 조회(노드 직접)는 되고, 주소별 tx 목록만 503 이 된다.
 const pool = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL) : null;
 const noDb = async () => { throw new Error('DATABASE_URL not set'); };
+// DB 가 없을 때의 가짜 store: 이름은 진짜와 같고 전부 실패한다 (→ 503 db_unavailable)
 const store = pool
   ? createStore(pool)
-  : { latestBlock: noDb, coverage: noDb, listAddressTxs: noDb };
+  : Object.fromEntries(Object.keys(createStore(null)).map((name) => [name, noDb]));
 
 // 화면에 보일 체인 이름·잔액 단위. 비우면 chainId 1 → Ethereum/ETH, 그 외 → "Chain <id>"/ETH
 const chain = {

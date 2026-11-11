@@ -11,8 +11,8 @@
  *   - 에러 본문은 항상 { "error": "<코드>" } 한 가지 모양이다. 클라이언트가 분기하기 쉽다.
  *   - /v1 : 응답 모양을 깨는 변경이 필요해지면 /v2 를 새로 열고 v1 은 남겨 둔다.
  */
-import { getTx, getBlock, getAddress } from './explorer.js';
-import { isTxHash, isBlockId, isAddress, parseLimit, parseCursor, parseIndexCursor } from './validate.js';
+import { getTx, getBlock, getAddress, getTrace, getStateDiff, getTokenInfo, contractsAmong, isUnsupported } from './explorer.js';
+import { isTxHash, isBlockId, isAddress, parseLimit, parseCursor, parseIndexCursor, parsePage } from './validate.js';
 
 /** 경로 → 처리 함수 표. 새 API 는 여기에 한 줄 추가하는 것으로 끝난다. */
 const routes = [
@@ -126,7 +126,186 @@ const routes = [
       return [200, { address, ...page, coverage }];
     },
   },
+  {
+    // 내부 트랜잭션 (trace). 노드가 debug API 를 열어 두지 않았으면 501 — 고장(503)이 아니라 "이 노드로는 불가"
+    method: 'GET',
+    path: /^\/api\/v1\/txs\/([^/]+)\/trace$/,
+    handle: ({ rpc }, [hash]) => {
+      if (!isTxHash(hash)) return [400, { error: 'invalid_tx_hash' }];
+      return traced(getTrace(rpc, hash));
+    },
+  },
+  {
+    // 상태 변화 (prestateTracer diff)
+    method: 'GET',
+    path: /^\/api\/v1\/txs\/([^/]+)\/state$/,
+    handle: ({ rpc }, [hash]) => {
+      if (!isTxHash(hash)) return [400, { error: 'invalid_tx_hash' }];
+      return traced(getStateDiff(rpc, hash));
+    },
+  },
+
+  /* ── 토큰 (홀더 추적) ───────────────────────────────────────────────── */
+  {
+    // 추적 중인 토큰 목록 (worker 의 TOKENS 설정). 홀더 수 많은 순
+    method: 'GET',
+    path: /^\/api\/v1\/tokens$/,
+    handle: async ({ rpc, store }) => {
+      const [items, head] = await Promise.all([store.listTokens(), rpc.call('eth_blockNumber')]);
+      return [200, { items, head: BigInt(head).toString() }];
+    },
+  },
+  {
+    // 토큰 개요: 이름·심볼·소수점·총발행량은 노드에서 지금 값, 홀더 수·전송 수·수집 진행은 DB 에서.
+    // 추적 대상이 아닌 ERC-20 도 개요는 보여준다 (tracked=false). DB 가 죽어 있으면 tracked=null.
+    method: 'GET',
+    path: /^\/api\/v1\/tokens\/([^/]+)$/,
+    handle: async ({ rpc, store }, [address]) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      const [info, row, head] = await Promise.all([
+        getTokenInfo(rpc, address),
+        store.getToken(address).catch(() => undefined),
+        rpc.call('eth_blockNumber'),
+      ]);
+      if (!info && !row) return [404, { error: 'not_found' }];
+      return [200, {
+        address: address.toLowerCase(),
+        name: info?.name ?? row?.name ?? null,
+        symbol: info?.symbol ?? row?.symbol ?? null,
+        decimals: info?.decimals ?? row?.decimals ?? null,
+        totalSupply: info?.totalSupply ?? null,
+        tracked: row === undefined ? null : !!row,
+        holders: row?.holders ?? null,
+        transfers: row?.transfers ?? null,
+        startBlock: row?.startBlock ?? null,
+        syncedBlock: row?.syncedBlock ?? null,
+        head: BigInt(head).toString(),
+      }];
+    },
+  },
+  {
+    // 홀더 순위. ?page=1&limit=50 (Etherscan 처럼 페이지 번호로 넘긴다)
+    method: 'GET',
+    path: /^\/api\/v1\/tokens\/([^/]+)\/holders$/,
+    handle: async ({ rpc, store }, [address], query) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      const limit = parseLimit(query.get('limit'), 50, 100);
+      if (limit === null) return [400, { error: 'invalid_limit' }];
+      const page = parsePage(query.get('page'));
+      if (page === null) return [400, { error: 'invalid_page' }];
+      const token = await store.getToken(address);
+      if (!token) return [404, { error: 'not_tracked' }];
+      const items = await store.tokenHolders(address, { limit, offset: (page - 1) * limit });
+      // 컨트랙트 표시는 덤이다. 노드가 대답을 못 해도 표는 보여준다
+      const contracts = new Set(await contractsAmong(rpc, items.map((x) => x.address)).catch(() => []));
+      return [200, {
+        items: items.map((x) => ({ ...x, isContract: contracts.has(x.address) })),
+        page,
+        limit,
+        total: token.holders,
+        totalPages: Math.max(1, Math.ceil(token.holders / limit)),
+        syncedBlock: token.syncedBlock,
+      }];
+    },
+  },
+  {
+    // 홀더 분포 요약 (상위 N 명 비중, 지니 계수, 보유량 구간)
+    method: 'GET',
+    path: /^\/api\/v1\/tokens\/([^/]+)\/holders\/summary$/,
+    handle: async ({ store }, [address]) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      if (!(await store.getToken(address))) return [404, { error: 'not_tracked' }];
+      return [200, await store.tokenHolderSummary(address)];
+    },
+  },
+  {
+    // 전체 홀더 CSV (순위, 주소, 잔액 정수, 잔액 소수점 적용)
+    method: 'GET',
+    path: /^\/api\/v1\/tokens\/([^/]+)\/holders\.csv$/,
+    handle: async ({ store }, [address]) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      const token = await store.getToken(address);
+      if (!token) return [404, { error: 'not_tracked' }];
+      const rows = await store.allTokenHolders(address);
+      const lines = ['rank,address,balance_raw,balance'];
+      for (const r of rows) lines.push(`${r.rank},${r.address},${r.balance},${withDecimals(r.balance, token.decimals ?? 0)}`);
+      const name = (token.symbol ?? 'token').replace(/[^\w.-]/g, '_');
+      return [200, new Raw(lines.join('\n') + '\n', {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="${name}-holders-${token.syncedBlock ?? 0}.csv"`,
+      })];
+    },
+  },
+  {
+    // 토큰 전송 목록 (최신순). ?holder=0x… 를 주면 그 주소가 보내거나 받은 것만 + 그 주소의 잔액
+    method: 'GET',
+    path: /^\/api\/v1\/tokens\/([^/]+)\/transfers$/,
+    handle: async ({ store }, [address], query) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      const limit = parseLimit(query.get('limit'));
+      if (limit === null) return [400, { error: 'invalid_limit' }];
+      const cursor = query.has('cursor') ? parseCursor(query.get('cursor')) : undefined;
+      if (cursor === null) return [400, { error: 'invalid_cursor' }];
+      const holder = query.get('holder') ?? undefined;
+      if (holder !== undefined && !isAddress(holder)) return [400, { error: 'invalid_address' }];
+      const token = await store.getToken(address);
+      if (!token) return [404, { error: 'not_tracked' }];
+      const [page, holderBalance] = await Promise.all([
+        store.listTokenTransfers({ token: address, holder, limit, before: cursor }),
+        holder ? store.tokenBalanceOf(address, holder) : undefined,
+      ]);
+      return [200, { ...page, holder: holder?.toLowerCase(), holderBalance, total: token.transfers, syncedBlock: token.syncedBlock }];
+    },
+  },
+  {
+    // 주소가 가진 (추적 중인) 토큰 잔액
+    method: 'GET',
+    path: /^\/api\/v1\/addresses\/([^/]+)\/tokens$/,
+    handle: async ({ store }, [address]) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      return [200, { address, items: await store.addressTokenBalances(address) }];
+    },
+  },
+  {
+    // 주소의 토큰 전송 (추적 중인 모든 토큰). Etherscan 주소 페이지의 "Token Transfers (ERC-20)"
+    method: 'GET',
+    path: /^\/api\/v1\/addresses\/([^/]+)\/token-transfers$/,
+    handle: async ({ store }, [address], query) => {
+      if (!isAddress(address)) return [400, { error: 'invalid_address' }];
+      const limit = parseLimit(query.get('limit'));
+      if (limit === null) return [400, { error: 'invalid_limit' }];
+      const cursor = query.has('cursor') ? parseCursor(query.get('cursor')) : undefined;
+      if (cursor === null) return [400, { error: 'invalid_cursor' }];
+      return [200, { address, ...(await store.listTokenTransfers({ holder: address, limit, before: cursor })) }];
+    },
+  },
 ];
+
+/** "1234567", 6 → "1.234567" (CSV 용. 화면 표시는 클라이언트의 formatUnits) */
+function withDecimals(raw, decimals) {
+  if (!decimals) return raw;
+  const s = raw.padStart(decimals + 1, '0');
+  const frac = s.slice(-decimals).replace(/0+$/, '');
+  return frac ? `${s.slice(0, -decimals)}.${frac}` : s.slice(0, -decimals);
+}
+
+/** JSON 이 아닌 응답 (CSV 등). handle 이 [200, new Raw(text, headers)] 로 돌려준다 */
+class Raw {
+  constructor(text, headers) {
+    this.text = text;
+    this.headers = headers;
+  }
+}
+
+/** 트레이스 결과: null → 404, 노드가 debug API 를 지원하지 않음 → 501 */
+async function traced(promise) {
+  try {
+    return await found(promise);
+  } catch (err) {
+    if (isUnsupported(err)) return [501, { error: 'trace_unsupported' }];
+    throw err;
+  }
+}
 
 /** explorer 함수의 결과가 null 이면 404, 아니면 200 */
 async function found(promise) {
@@ -212,6 +391,10 @@ export function createApp({ rpc, store, chain = {} }) {
     try {
       const params = hit.m.slice(1).map(decodeURIComponent);
       const [status, body] = await hit.route.handle(ctx, params, url.searchParams);
+      if (body instanceof Raw) {
+        res.writeHead(status, { ...body.headers, 'cache-control': 'no-store' });
+        return res.end(body.text);
+      }
       return sendJson(res, status, body);
     } catch (err) {
       if (err instanceof UpstreamError) {

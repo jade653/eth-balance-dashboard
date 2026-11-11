@@ -38,6 +38,14 @@ export function parseLimit(v, dflt = 25, max = 100) {
   return n >= 1 && n <= max ? n : null;
 }
 
+// 페이지 번호 (홀더 순위표). 없으면 1, 1 ~ 1,000,000 만 허용.
+export function parsePage(v) {
+  if (v === null || v === undefined) return 1;
+  if (!/^[1-9]\d{0,6}$/.test(v)) return null;
+  const n = Number(v);
+  return n <= 1_000_000 ? n : null;
+}
+
 // 블록 안 tx 목록의 커서 = 블록 안 순서(tx_index) 하나. 틀리면 null.
 export function parseIndexCursor(v) {
   return typeof v === 'string' && /^(0|[1-9]\d{0,5})$/.test(v) ? Number(v) : null;

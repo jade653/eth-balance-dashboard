@@ -44,6 +44,9 @@ cat > .env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 RPC_HTTP_URL=https://ethereum-rpc.publicnode.com
 RETENTION_HOURS=24
+# 홀더를 추적할 토큰. 자체 체인이면 비워 둬도 worker 가 체인의 ERC-20 을 스스로 찾는다.
+# 이더리움 메인넷·테스트넷 같은 공개 체인에서는 자동 인식이 꺼지므로 여기에 적는다: 0x토큰주소@배포블록
+TOKENS=
 WEB_PORT=8080
 PGDATA_DIR=<데이터 디렉터리>/pgdata
 EOF

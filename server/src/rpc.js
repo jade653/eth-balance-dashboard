@@ -86,7 +86,7 @@ class RpcClient {
   async call(method, params = []) {
     const id = ++this.nextId;
     const json = await this.#post({ jsonrpc: '2.0', id, method, params });
-    if (json.error) throw new Error(`${method}: ${json.error.message}`);
+    if (json.error) throw rpcError(method, json.error);
     return json.result;
   }
 
@@ -129,7 +129,7 @@ class RpcClient {
     return payload.map((req, i) => {
       const r = byId.get(req.id);
       if (!r) throw new Error(`${calls[i].method}: 배치 응답 누락 (id=${req.id})`);
-      if (r.error) throw new Error(`${calls[i].method}: ${r.error.message}`);
+      if (r.error) throw rpcError(calls[i].method, r.error);
       return r.result;
     });
   }
@@ -139,6 +139,13 @@ class RpcClient {
     for (const c of calls) out.push(await this.call(c.method, c.params));
     return out;
   }
+}
+
+/** 노드가 돌려준 JSON-RPC 에러. code 를 남겨 둬야 "메서드 없음(-32601)" 같은 걸 구분할 수 있다 */
+function rpcError(method, error) {
+  const e = new Error(`${method}: ${error.message}`);
+  e.rpcCode = error.code;
+  return e;
 }
 
 export { RpcClient };

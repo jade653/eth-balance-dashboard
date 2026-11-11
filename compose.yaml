@@ -58,6 +58,13 @@ services:
       BLOCK_TIME_S: ${BLOCK_TIME_S:-}
       # 1 이면 DB 에 다른 체인의 데이터가 있을 때 지우고 새로 쌓는다 (체인을 바꿀 때 한 번만 켠다)
       RESET_ON_CHAIN_CHANGE: ${RESET_ON_CHAIN_CHANGE:-}
+      # 토큰 자동 인식: auto = 공개 체인(메인넷 등)이 아니면 체인의 ERC-20 을 스스로 찾아 추적 / on / off
+      TOKEN_DISCOVERY: ${TOKEN_DISCOVERY:-auto}
+      TOKEN_DISCOVERY_MAX: ${TOKEN_DISCOVERY_MAX:-100}
+      # 자동 인식과 별개로 꼭 추적할 ERC-20: "0x토큰주소@배포블록,0x다른토큰…" (공개 체인에서는 이걸로 적는다)
+      TOKENS: ${TOKENS:-}
+      # 최신 블록에서 이만큼 뒤까지만 모은다 (리오그로 바뀔 수 있는 블록은 건너뜀)
+      TOKEN_CONFIRMATIONS: ${TOKEN_CONFIRMATIONS:-5}
     # 반드시 1개. 둘이면 같은 블록을 두 번 받고 리오그 되감기가 서로 꼬인다.
     deploy:
       replicas: 1
