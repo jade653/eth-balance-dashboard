@@ -1,0 +1,3317 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Mustsem Explorer API",
+    "version": "1.0.0",
+    "description": "Mustsem 체인(chainId 7601, 단위 MST) 블록 탐색기의 REST API. 숫자는 10진수 문자열, 에러 본문은 {\"error\": \"<코드>\"} 한 가지 모양."
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "이 문서를 연 서버"
+    }
+  ],
+  "tags": [
+    {
+      "name": "상태",
+      "description": "서버·노드·인덱서 상태와 체인 정보"
+    },
+    {
+      "name": "트랜잭션",
+      "description": "트랜잭션 한 건 조회, 최신 목록, 내부 호출·상태 변화"
+    },
+    {
+      "name": "블록",
+      "description": "블록 한 건 조회, 최신 목록, 블록 안의 트랜잭션"
+    },
+    {
+      "name": "주소",
+      "description": "잔액·nonce, 주소의 트랜잭션·토큰 잔액·토큰 전송"
+    },
+    {
+      "name": "토큰",
+      "description": "ERC-20 토큰(STB, wMST 등)의 개요, 홀더 순위, 전송 내역. worker가 체인에서 토큰을 자동으로 찾아 추적합니다"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "상태"
+        ],
+        "operationId": "getHealth",
+        "summary": "서버·노드 상태와 인덱서 진행 상황",
+        "x-source": [
+          "rpc",
+          "db"
+        ],
+        "description": "노드의 chainId와 최신 블록을 묻습니다. 인덱서 정보는 덤이라 DB가 죽어 있어도 200을 주고 indexer만 null이 됩니다. 노드에 못 닿을 때만 503입니다.",
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                },
+                "example": {
+                  "ok": true,
+                  "chainId": 7601,
+                  "block": "14198924",
+                  "indexer": {
+                    "fromBlock": "14195402",
+                    "toBlock": "14198923",
+                    "fromTime": "2026-11-11T22:02:52.000Z",
+                    "toTime": "2026-11-12T00:00:14.000Z",
+                    "lag": "1"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chain": {
+      "get": {
+        "tags": [
+          "상태"
+        ],
+        "operationId": "getChain",
+        "summary": "화면에 표시할 체인 이름·단위",
+        "x-source": [
+          "rpc"
+        ],
+        "description": "chainId는 노드에서, 이름·단위는 서버 설정(CHAIN_NAME, NATIVE_SYMBOL)에서 옵니다.",
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chain"
+                },
+                "example": {
+                  "chainId": 7601,
+                  "name": "Mustsem",
+                  "symbol": "MST"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "tags": [
+          "상태"
+        ],
+        "operationId": "getStats",
+        "summary": "홈 화면 통계: 24시간 tx 수, 평균 블록 시간",
+        "x-source": [
+          "db"
+        ],
+        "description": "인덱서가 쌓은 블록 표만 봅니다. 평균 블록 시간은 최근 100블록 기준이고, Mustsem은 약 2초입니다.",
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stats"
+                },
+                "example": {
+                  "txs24h": "0",
+                  "blocks24h": "3526",
+                  "avgBlockTimeSec": 2,
+                  "coverage": {
+                    "fromBlock": "14195402",
+                    "toBlock": "14198929",
+                    "fromTime": "2026-11-11T22:02:52.000Z",
+                    "toTime": "2026-11-12T00:00:26.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/txs": {
+      "get": {
+        "tags": [
+          "트랜잭션"
+        ],
+        "operationId": "listLatestTxs",
+        "summary": "최신 트랜잭션 목록",
+        "x-source": [
+          "db"
+        ],
+        "description": "가장 최근 블록부터, 블록 안에서는 뒤 순서부터 정렬합니다. 보관 범위 안에 tx가 없으면 items가 빈 배열입니다.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~25",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TxList"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "hash": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957",
+                      "blockNumber": "14157394",
+                      "txIndex": 0,
+                      "timestamp": "2026-11-11T00:55:56.000Z",
+                      "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "to": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "valueWei": "0",
+                      "method": "0xa9059cbb"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "limit 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/txs/{hash}": {
+      "get": {
+        "tags": [
+          "트랜잭션"
+        ],
+        "operationId": "getTx",
+        "summary": "트랜잭션 상세 (이벤트 로그·토큰 전송 포함)",
+        "x-source": [
+          "rpc"
+        ],
+        "description": "노드에 직접 묻기 때문에 보관 기간과 상관없이 조회됩니다. 토큰 송금 tx의 to는 토큰 컨트랙트이고, 실제로 토큰을 받은 주소는 tokenTransfers에 있습니다. tokenTransfers는 receipt의 Transfer 이벤트 로그에서 뽑으므로 실패한 tx는 비어 있습니다. 아직 블록에 들어가지 않은 tx는 status가 pending이고 PendingTx 모양으로 옵니다.",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "required": true,
+            "description": "트랜잭션 해시 (0x + 16진수 64자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{64}$"
+            },
+            "example": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "찾음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TxDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingTx"
+                    }
+                  ]
+                },
+                "example": {
+                  "hash": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957",
+                  "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                  "to": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                  "valueWei": "0",
+                  "nonce": "0",
+                  "gasLimit": "96522",
+                  "type": 2,
+                  "maxFeePerGasWei": "136",
+                  "maxPriorityFeePerGasWei": "100",
+                  "input": "0xa9059cbb0000000000000000000000008643ab99d1b92366670415ee20154b33e54048f400000000000000000000000000000000000000000000000000000022ecb25c00",
+                  "authorizationList": null,
+                  "status": "success",
+                  "blockNumber": "14157394",
+                  "timestamp": "2026-11-11T00:55:56.000Z",
+                  "contractCreated": null,
+                  "feeWei": "6795891",
+                  "gasUsed": "63513",
+                  "gasPriceWei": "107",
+                  "baseFeePerGasWei": "7",
+                  "burntFeeWei": "444591",
+                  "savingsFeeWei": "1841877",
+                  "position": "0",
+                  "blobGasUsed": null,
+                  "blobGasPriceWei": null,
+                  "logCount": 1,
+                  "logs": [
+                    {
+                      "address": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "topics": [
+                        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                        "0x0000000000000000000000009e53b59c24481f0011586e060bde03726c3d1e09",
+                        "0x0000000000000000000000008643ab99d1b92366670415ee20154b33e54048f4"
+                      ],
+                      "data": "0x00000000000000000000000000000000000000000000000000000022ecb25c00",
+                      "logIndex": "0"
+                    }
+                  ],
+                  "tokenTransfers": [
+                    {
+                      "token": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "to": "0x8643ab99d1b92366670415ee20154b33e54048f4",
+                      "amount": "150000000000",
+                      "name": "Stable Token",
+                      "symbol": "STB",
+                      "decimals": 6
+                    }
+                  ],
+                  "tokens": {
+                    "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38": {
+                      "name": "Stable Token",
+                      "symbol": "STB",
+                      "decimals": 6
+                    }
+                  },
+                  "contracts": [
+                    "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "해시 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_tx_hash": {
+                    "value": {
+                      "error": "invalid_tx_hash"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "형식은 맞는데 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_found": {
+                    "value": {
+                      "error": "not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/txs/{hash}/trace": {
+      "get": {
+        "tags": [
+          "트랜잭션"
+        ],
+        "operationId": "getTxTrace",
+        "summary": "내부 트랜잭션 (컨트랙트가 실행 중에 부른 호출)",
+        "x-source": [
+          "rpc"
+        ],
+        "description": "노드의 debug_traceTransaction(callTracer)로 실행을 다시 돌려 봐야 나오는 정보입니다. Mustsem 노드는 debug API를 열어 두지 않아 현재 항상 501을 돌려줍니다. 고장(503)이 아니라 \"이 노드로는 불가\"라는 뜻입니다. 200 예시는 debug API가 열린 노드에서의 응답 모양입니다.",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "required": true,
+            "description": "트랜잭션 해시 (0x + 16진수 64자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{64}$"
+            },
+            "example": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "찾음 (debug API를 지원하는 노드에서만)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trace"
+                },
+                "example": {
+                  "error": null,
+                  "revertReason": null,
+                  "calls": [
+                    {
+                      "type": "CALL",
+                      "from": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "to": "0x8643ab99d1b92366670415ee20154b33e54048f4",
+                      "valueWei": "0",
+                      "gasLimit": "30000",
+                      "gasUsed": "2300",
+                      "error": null,
+                      "depth": 1,
+                      "path": "0"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "해시 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_tx_hash": {
+                    "value": {
+                      "error": "invalid_tx_hash"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "형식은 맞는데 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_found": {
+                    "value": {
+                      "error": "not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "노드가 트레이스(debug API)를 열어 두지 않음. Mustsem 노드는 현재 항상 이 응답입니다",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "trace_unsupported": {
+                    "value": {
+                      "error": "trace_unsupported"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/txs/{hash}/state": {
+      "get": {
+        "tags": [
+          "트랜잭션"
+        ],
+        "operationId": "getTxState",
+        "summary": "상태 변화 (잔액·nonce·저장소의 전/후)",
+        "x-source": [
+          "rpc"
+        ],
+        "description": "노드의 prestateTracer(diffMode)로 이 tx가 바꾼 주소만 전/후 값으로 보여 줍니다. trace와 같은 이유로 Mustsem 노드에서는 현재 항상 501입니다. 200 예시는 응답 모양입니다.",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "required": true,
+            "description": "트랜잭션 해시 (0x + 16진수 64자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{64}$"
+            },
+            "example": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "찾음 (debug API를 지원하는 노드에서만)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateDiff"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "address": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "balanceBefore": "5000000000000000",
+                      "balanceAfter": "4999999993204109",
+                      "nonceBefore": 0,
+                      "nonceAfter": 1,
+                      "storage": []
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "해시 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_tx_hash": {
+                    "value": {
+                      "error": "invalid_tx_hash"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "형식은 맞는데 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_found": {
+                    "value": {
+                      "error": "not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "노드가 트레이스(debug API)를 열어 두지 않음. Mustsem 노드는 현재 항상 이 응답입니다",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "trace_unsupported": {
+                    "value": {
+                      "error": "trace_unsupported"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/blocks": {
+      "get": {
+        "tags": [
+          "블록"
+        ],
+        "operationId": "listLatestBlocks",
+        "summary": "최신 블록 목록",
+        "x-source": [
+          "db"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~25",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockList"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "number": "14198927",
+                      "hash": "0x7a2ffa62d43ca8ab85386ecaf5be1adb1fa840d39a78e1cd35bfa1dc6ebde1d4",
+                      "timestamp": "2026-11-12T00:00:22.000Z",
+                      "txCount": 0,
+                      "miner": "0x0000000000000000000000000000000000000000",
+                      "gasUsed": "0",
+                      "gasLimit": "30000000",
+                      "baseFeePerGasWei": "7"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "limit 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/blocks/{id}": {
+      "get": {
+        "tags": [
+          "블록"
+        ],
+        "operationId": "getBlock",
+        "summary": "블록 상세와 포함된 tx 해시 목록",
+        "x-source": [
+          "rpc"
+        ],
+        "description": "tx 본문은 주지 않고 해시 목록만 줍니다. Mustsem은 PoA 체인이라 miner가 0x000…0이고, 실제 블록 서명자는 블록 헤더의 서명에 있습니다.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "블록 번호(10진수) 또는 latest. 16진수(0x…)는 받지 않습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^(latest|0|[1-9]\\d{0,14})$"
+            },
+            "example": "14157394"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "찾음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Block"
+                },
+                "example": {
+                  "number": "14157394",
+                  "hash": "0xb7dab747c4db8d7eda918a9b7662660b9d4367dded651c294f9cd16666c8d8ea",
+                  "parentHash": "0xcbd1230caf18ba13506eb08963341a53213d1fe7e348e5722d91dd3376f4de02",
+                  "timestamp": "2026-11-11T00:55:56.000Z",
+                  "miner": "0x0000000000000000000000000000000000000000",
+                  "gasUsed": "63513",
+                  "gasLimit": "30000000",
+                  "baseFeePerGasWei": "7",
+                  "txCount": 1,
+                  "transactions": [
+                    "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "블록 id 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_block_id": {
+                    "value": {
+                      "error": "invalid_block_id"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "형식은 맞는데 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_found": {
+                    "value": {
+                      "error": "not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/blocks/{number}/txs": {
+      "get": {
+        "tags": [
+          "블록"
+        ],
+        "operationId": "listBlockTxs",
+        "summary": "블록 안의 트랜잭션 목록",
+        "x-source": [
+          "db"
+        ],
+        "description": "블록 안 순서의 역순으로 줍니다. 보관 범위 밖 블록이면 items가 빈 배열이고, coverage로 지금 DB에 있는 범위를 알려 줍니다.",
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "description": "블록 번호(10진수). 이 경로는 latest를 받지 않습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d{0,14})$"
+            },
+            "example": "14157394"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "앞 응답의 nextCursor를 그대로 넘깁니다. 블록 안 순서(tx_index)",
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d{0,5})$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockTxPage"
+                },
+                "example": {
+                  "blockNumber": "14157394",
+                  "items": [
+                    {
+                      "hash": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957",
+                      "blockNumber": "14157394",
+                      "txIndex": 0,
+                      "timestamp": "2026-11-11T00:55:56.000Z",
+                      "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "to": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "valueWei": "0",
+                      "method": "0xa9059cbb"
+                    }
+                  ],
+                  "nextCursor": null,
+                  "coverage": {
+                    "fromBlock": "14195402",
+                    "toBlock": "14198929",
+                    "fromTime": "2026-11-11T22:02:52.000Z",
+                    "toTime": "2026-11-12T00:00:26.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_block_id": {
+                    "value": {
+                      "error": "invalid_block_id"
+                    }
+                  },
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  },
+                  "invalid_cursor": {
+                    "value": {
+                      "error": "invalid_cursor"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/addresses/{address}": {
+      "get": {
+        "tags": [
+          "주소"
+        ],
+        "operationId": "getAddress",
+        "summary": "잔액, nonce, 개인 지갑(EOA)·컨트랙트 구분",
+        "x-source": [
+          "rpc"
+        ],
+        "description": "주소는 형식만 맞으면 항상 200입니다. 한 번도 쓰이지 않은 주소도 잔액 0으로 나옵니다. balanceWei의 단위는 MST의 최소 단위(10^-18 MST)입니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "주소 (0x + 16진수 40자리). 대소문자를 섞어도 되고, EIP-55 체크섬은 검사하지 않습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x9e53b59c24481f0011586e060bde03726c3d1e09"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Address"
+                },
+                "example": {
+                  "address": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                  "balanceWei": "4999999993204109",
+                  "nonce": "1",
+                  "type": "eoa",
+                  "delegatedTo": null
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "주소 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/addresses/{address}/txs": {
+      "get": {
+        "tags": [
+          "주소"
+        ],
+        "operationId": "listAddressTxs",
+        "summary": "주소의 트랜잭션 목록 (최신순)",
+        "x-source": [
+          "db"
+        ],
+        "description": "JSON-RPC에는 없는 기능이라 인덱서가 쌓은 DB에서 읽습니다. 이 주소가 보냈거나 받은(to) tx가 나오고, direction이 이 주소 기준 방향입니다. 목록이 비어 있으면 coverage 기간 안에 없다는 뜻입니다. 토큰 수신은 /token-transfers에 있습니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "주소 (0x + 16진수 40자리). 대소문자를 섞어도 되고, EIP-55 체크섬은 검사하지 않습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x9e53b59c24481f0011586e060bde03726c3d1e09"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "앞 응답의 nextCursor를 그대로 넘깁니다. 형식: <블록 번호>-<블록 안 순서>",
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d{0,14})-(0|[1-9]\\d{0,5})$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressTxPage"
+                },
+                "example": {
+                  "address": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                  "items": [
+                    {
+                      "hash": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957",
+                      "blockNumber": "14157394",
+                      "txIndex": 0,
+                      "timestamp": "2026-11-11T00:55:56.000Z",
+                      "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "to": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "valueWei": "0",
+                      "method": "0xa9059cbb",
+                      "direction": "out"
+                    }
+                  ],
+                  "nextCursor": null,
+                  "coverage": {
+                    "fromBlock": "14195402",
+                    "toBlock": "14198929",
+                    "fromTime": "2026-11-11T22:02:52.000Z",
+                    "toTime": "2026-11-12T00:00:26.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  },
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  },
+                  "invalid_cursor": {
+                    "value": {
+                      "error": "invalid_cursor"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/addresses/{address}/tokens": {
+      "get": {
+        "tags": [
+          "주소"
+        ],
+        "operationId": "listAddressTokens",
+        "summary": "주소가 가진 토큰 잔액",
+        "x-source": [
+          "db"
+        ],
+        "description": "추적 중인 토큰 가운데 이 주소의 잔액이 0보다 큰 것만 줍니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "주소 (0x + 16진수 40자리). 대소문자를 섞어도 되고, EIP-55 체크섬은 검사하지 않습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x9e53b59c24481f0011586e060bde03726c3d1e09"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressTokens"
+                },
+                "example": {
+                  "address": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                  "items": [
+                    {
+                      "token": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "name": "Stable Token",
+                      "symbol": "STB",
+                      "decimals": 6,
+                      "balance": "150000000000"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "주소 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/addresses/{address}/token-transfers": {
+      "get": {
+        "tags": [
+          "주소"
+        ],
+        "operationId": "listAddressTokenTransfers",
+        "summary": "주소의 토큰 전송 내역 (최신순)",
+        "x-source": [
+          "db"
+        ],
+        "description": "추적 중인 모든 토큰에서 이 주소가 보내거나 받은 전송입니다. Etherscan 주소 페이지의 \"Token Transfers (ERC-20)\" 탭과 같습니다. 보관 기간 제한 없이 토큰 추적을 시작한 블록부터 전부 있습니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "주소 (0x + 16진수 40자리). 대소문자를 섞어도 되고, EIP-55 체크섬은 검사하지 않습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x9e53b59c24481f0011586e060bde03726c3d1e09"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "앞 응답의 nextCursor를 그대로 넘깁니다. 형식: <블록 번호>-<블록 안 순서>",
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d{0,14})-(0|[1-9]\\d{0,5})$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressTokenTransferPage"
+                },
+                "example": {
+                  "address": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                  "items": [
+                    {
+                      "token": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "tokenName": "Stable Token",
+                      "tokenSymbol": "STB",
+                      "tokenDecimals": 6,
+                      "txHash": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957",
+                      "blockNumber": "14157394",
+                      "logIndex": 0,
+                      "timestamp": "2026-11-11T00:55:56.000Z",
+                      "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "to": "0x8643ab99d1b92366670415ee20154b33e54048f4",
+                      "amount": "150000000000",
+                      "method": "0xa9059cbb",
+                      "direction": "out"
+                    }
+                  ],
+                  "nextCursor": "14157394-0"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  },
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  },
+                  "invalid_cursor": {
+                    "value": {
+                      "error": "invalid_cursor"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens": {
+      "get": {
+        "tags": [
+          "토큰"
+        ],
+        "operationId": "listTokens",
+        "summary": "추적 중인 토큰 목록 (홀더 많은 순)",
+        "x-source": [
+          "db",
+          "rpc"
+        ],
+        "description": "worker가 체인에서 찾아 추적하는 ERC-20 토큰입니다. head는 노드의 최신 블록이라, syncedBlock과 비교하면 수집이 얼마나 따라왔는지 알 수 있습니다.",
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenList"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "address": "0x2affeb7a958851645092cce8de9d2dbc88f2adf1",
+                      "name": "wMST",
+                      "symbol": "wMST",
+                      "decimals": 0,
+                      "startBlock": "13341971",
+                      "syncedBlock": "14198922",
+                      "holders": 7,
+                      "transfers": "31",
+                      "updatedAt": "2026-11-12T00:00:23.786Z"
+                    },
+                    {
+                      "address": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "name": "Stable Token",
+                      "symbol": "STB",
+                      "decimals": 6,
+                      "startBlock": "14156147",
+                      "syncedBlock": "14198922",
+                      "holders": 4,
+                      "transfers": "4",
+                      "updatedAt": "2026-11-12T00:00:23.791Z"
+                    }
+                  ],
+                  "head": "14198929"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드나 DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  },
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{address}": {
+      "get": {
+        "tags": [
+          "토큰"
+        ],
+        "operationId": "getToken",
+        "summary": "토큰 개요: 이름·총발행량·홀더 수",
+        "x-source": [
+          "rpc",
+          "db"
+        ],
+        "description": "이름·심볼·소수점·총발행량은 노드에 지금 묻고, 홀더 수·전송 수·수집 진행은 DB에서 읽습니다. 추적하지 않는 ERC-20도 개요는 보여 주고 tracked가 false입니다. DB가 죽어 있으면 tracked가 null입니다. ERC-20이 아닌 주소는 404입니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "토큰 컨트랙트 주소 (0x + 16진수 40자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "찾음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                },
+                "example": {
+                  "address": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                  "name": "Stable Token",
+                  "symbol": "STB",
+                  "decimals": 6,
+                  "totalSupply": "600000000000",
+                  "tracked": true,
+                  "holders": 4,
+                  "transfers": "4",
+                  "startBlock": "14156147",
+                  "syncedBlock": "14198922",
+                  "head": "14198929"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "주소 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "형식은 맞는데 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_found": {
+                    "value": {
+                      "error": "not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "노드(RPC)에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "rpc_unavailable": {
+                    "value": {
+                      "error": "rpc_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{address}/holders": {
+      "get": {
+        "tags": [
+          "토큰"
+        ],
+        "operationId": "listTokenHolders",
+        "summary": "홀더 순위 (잔액 많은 순, 페이지 번호)",
+        "x-source": [
+          "db",
+          "rpc"
+        ],
+        "description": "Etherscan처럼 페이지 번호로 넘깁니다. isContract는 노드에 묻는 덤 정보라, 노드가 대답하지 못하면 모두 false로 옵니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "토큰 컨트랙트 주소 (0x + 16진수 40자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "페이지 번호. 1부터 시작",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HolderPage"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "rank": 1,
+                      "address": "0x8643ab99d1b92366670415ee20154b33e54048f4",
+                      "balance": "150000000000",
+                      "isContract": false
+                    },
+                    {
+                      "rank": 2,
+                      "address": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "balance": "150000000000",
+                      "isContract": false
+                    },
+                    {
+                      "rank": 3,
+                      "address": "0xb698b88eb04c983ec13065176be45f4599d640d1",
+                      "balance": "150000000000",
+                      "isContract": false
+                    }
+                  ],
+                  "page": 1,
+                  "limit": 3,
+                  "total": 4,
+                  "totalPages": 2,
+                  "syncedBlock": "14198922"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  },
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  },
+                  "invalid_page": {
+                    "value": {
+                      "error": "invalid_page"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "추적 중인 토큰이 아님",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_tracked": {
+                    "value": {
+                      "error": "not_tracked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{address}/holders/summary": {
+      "get": {
+        "tags": [
+          "토큰"
+        ],
+        "operationId": "getTokenHolderSummary",
+        "summary": "홀더 분포 요약 (상위 N명 보유량, 보유량 구간)",
+        "x-source": [
+          "db"
+        ],
+        "description": "상위 5·10·25·50·100명이 가진 양, 전체의 1% 이상을 가진 주소 수, 보유량 자릿수별 분포를 줍니다. 비율은 topN ÷ totalHeld로 계산합니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "토큰 컨트랙트 주소 (0x + 16진수 40자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HolderSummary"
+                },
+                "example": {
+                  "holders": 4,
+                  "totalHeld": "600000000000",
+                  "top5": "600000000000",
+                  "top10": "600000000000",
+                  "top25": "600000000000",
+                  "top50": "600000000000",
+                  "top100": "600000000000",
+                  "weighted": "1500000000000",
+                  "over1pct": 4,
+                  "magnitudes": [
+                    {
+                      "magnitude": 11,
+                      "count": 4
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "주소 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "추적 중인 토큰이 아님",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_tracked": {
+                    "value": {
+                      "error": "not_tracked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{address}/holders.csv": {
+      "get": {
+        "tags": [
+          "토큰"
+        ],
+        "operationId": "downloadTokenHolders",
+        "summary": "전체 홀더 CSV 내려받기",
+        "x-source": [
+          "db"
+        ],
+        "description": "페이지 없이 전체 홀더를 한 파일로 줍니다. 파일 이름은 <심볼>-holders-<syncedBlock>.csv입니다. balance_raw는 소수점 적용 전 정수, balance는 소수점을 적용한 값입니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "토큰 컨트랙트 주소 (0x + 16진수 40자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상 (Content-Disposition: attachment)",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "rank,address,balance_raw,balance\n1,0x8643ab99d1b92366670415ee20154b33e54048f4,150000000000,150000\n2,0x9e53b59c24481f0011586e060bde03726c3d1e09,150000000000,150000\n3,0xb698b88eb04c983ec13065176be45f4599d640d1,150000000000,150000\n4,0xbe5e707a0096dc8d451fcfdf4cbdea985d9d0ed4,150000000000,150000\n"
+              }
+            }
+          },
+          "400": {
+            "description": "주소 형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "추적 중인 토큰이 아님",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_tracked": {
+                    "value": {
+                      "error": "not_tracked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{address}/transfers": {
+      "get": {
+        "tags": [
+          "토큰"
+        ],
+        "operationId": "listTokenTransfers",
+        "summary": "토큰 전송 내역 (최신순)",
+        "x-source": [
+          "db"
+        ],
+        "description": "이 토큰의 모든 전송입니다. holder를 주면 그 주소가 보내거나 받은 것만 나오고, 각 행에 direction과 응답에 holderBalance가 붙습니다. from이 0x000…0이면 새로 발행(mint)된 것입니다.",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "description": "토큰 컨트랙트 주소 (0x + 16진수 40자리)",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "가져올 개수. 1~100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "앞 응답의 nextCursor를 그대로 넘깁니다. 형식: <블록 번호>-<블록 안 순서>",
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d{0,14})-(0|[1-9]\\d{0,5})$"
+            }
+          },
+          {
+            "name": "holder",
+            "in": "query",
+            "required": false,
+            "description": "이 주소가 보내거나 받은 전송만. 주면 응답에 그 주소의 잔액(holderBalance)이 붙습니다",
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$"
+            },
+            "example": "0x9e53b59c24481f0011586e060bde03726c3d1e09"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "정상",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenTransferPage"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "token": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "tokenName": "Stable Token",
+                      "tokenSymbol": "STB",
+                      "tokenDecimals": 6,
+                      "txHash": "0x6f3df22e4da405b55754d89de020b3d184da10a499956fcc269cc3f20bd5a957",
+                      "blockNumber": "14157394",
+                      "logIndex": 0,
+                      "timestamp": "2026-11-11T00:55:56.000Z",
+                      "from": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "to": "0x8643ab99d1b92366670415ee20154b33e54048f4",
+                      "amount": "150000000000",
+                      "method": "0xa9059cbb"
+                    },
+                    {
+                      "token": "0x80292876c2fbdbe1898e9c47b12d34c62f72fe38",
+                      "tokenName": "Stable Token",
+                      "tokenSymbol": "STB",
+                      "tokenDecimals": 6,
+                      "txHash": "0x8d4327467d6eeb149d1a1f6f8340463814184ce0c3e641afeb127244eaecdb58",
+                      "blockNumber": "14157386",
+                      "logIndex": 0,
+                      "timestamp": "2026-11-11T00:55:40.000Z",
+                      "from": "0x0000000000000000000000000000000000000000",
+                      "to": "0x9e53b59c24481f0011586e060bde03726c3d1e09",
+                      "amount": "300000000000",
+                      "method": "0x40c10f19"
+                    }
+                  ],
+                  "nextCursor": "14157386-0",
+                  "total": "4",
+                  "syncedBlock": "14198924"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "형식이 틀림",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_address": {
+                    "value": {
+                      "error": "invalid_address"
+                    }
+                  },
+                  "invalid_limit": {
+                    "value": {
+                      "error": "invalid_limit"
+                    }
+                  },
+                  "invalid_cursor": {
+                    "value": {
+                      "error": "invalid_cursor"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "추적 중인 토큰이 아님",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "not_tracked": {
+                    "value": {
+                      "error": "not_tracked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DB에 닿지 못함",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "db_unavailable": {
+                    "value": {
+                      "error": "db_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "description": "모든 에러 응답의 본문",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "에러 코드",
+            "enum": [
+              "invalid_tx_hash",
+              "invalid_block_id",
+              "invalid_address",
+              "invalid_limit",
+              "invalid_cursor",
+              "invalid_page",
+              "bad_request",
+              "not_found",
+              "not_tracked",
+              "method_not_allowed",
+              "trace_unsupported",
+              "rpc_unavailable",
+              "db_unavailable",
+              "internal_error"
+            ]
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "description": "서버·노드 상태",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "항상 true. 노드에 못 닿으면 이 본문 대신 503"
+          },
+          "chainId": {
+            "type": "integer",
+            "description": "노드의 체인 ID. Mustsem은 7601"
+          },
+          "block": {
+            "type": "string",
+            "format": "decimal",
+            "description": "노드의 최신 블록 번호"
+          },
+          "indexer": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IndexerStatus"
+              }
+            ],
+            "nullable": true,
+            "description": "DB가 없거나 응답하지 않으면 null"
+          }
+        }
+      },
+      "IndexerStatus": {
+        "type": "object",
+        "description": "인덱서가 DB에 쌓은 범위와 지연",
+        "properties": {
+          "fromBlock": {
+            "type": "string",
+            "format": "decimal",
+            "description": "DB의 가장 오래된 블록"
+          },
+          "toBlock": {
+            "type": "string",
+            "format": "decimal",
+            "description": "DB의 가장 최신 블록"
+          },
+          "fromTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "toTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lag": {
+            "type": "string",
+            "format": "decimal",
+            "description": "노드 최신 블록 − toBlock. 몇 블록 뒤처졌나"
+          }
+        }
+      },
+      "Coverage": {
+        "type": "object",
+        "nullable": true,
+        "description": "DB(인덱서)에 지금 들어 있는 범위. DB가 비어 있으면 null",
+        "properties": {
+          "fromBlock": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "toBlock": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "fromTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "toTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Chain": {
+        "type": "object",
+        "description": "화면에 보일 체인 정보",
+        "properties": {
+          "chainId": {
+            "type": "integer",
+            "description": "Mustsem은 7601"
+          },
+          "name": {
+            "type": "string",
+            "description": "예: Mustsem"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "기본 코인 단위. 예: MST"
+          }
+        }
+      },
+      "Stats": {
+        "type": "object",
+        "description": "홈 화면 통계",
+        "properties": {
+          "txs24h": {
+            "type": "string",
+            "format": "decimal",
+            "description": "최근 24시간 tx 수"
+          },
+          "blocks24h": {
+            "type": "string",
+            "format": "decimal",
+            "description": "최근 24시간 블록 수"
+          },
+          "avgBlockTimeSec": {
+            "type": "number",
+            "nullable": true,
+            "description": "최근 100블록의 평균 간격(초). 블록이 2개 미만이면 null"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          }
+        }
+      },
+      "TxSummary": {
+        "type": "object",
+        "description": "목록의 tx 한 줄 (DB)",
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "blockNumber": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "txIndex": {
+            "type": "integer",
+            "description": "블록 안 순서"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "nullable": true,
+            "description": "tx의 to. 토큰 송금이면 토큰 컨트랙트. null이면 컨트랙트 생성"
+          },
+          "valueWei": {
+            "type": "string",
+            "format": "decimal",
+            "description": "보낸 MST(최소 단위). 토큰 송금이면 보통 0"
+          },
+          "method": {
+            "type": "string",
+            "nullable": true,
+            "description": "호출한 함수 선택자(input 앞 4바이트). 단순 송금이면 \"0x\""
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out",
+              "self"
+            ],
+            "description": "주소별 목록에서만. 그 주소 기준 방향"
+          }
+        }
+      },
+      "TxList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TxSummary"
+            }
+          }
+        }
+      },
+      "TxDetail": {
+        "type": "object",
+        "description": "블록에 들어간 tx (노드)",
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "nullable": true,
+            "description": "받는 주소 또는 호출한 컨트랙트. null이면 컨트랙트 생성"
+          },
+          "valueWei": {
+            "type": "string",
+            "format": "decimal",
+            "description": "보낸 MST(최소 단위)"
+          },
+          "nonce": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "gasLimit": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "type": {
+            "type": "integer",
+            "enum": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            "description": "0 Legacy · 1 EIP-2930 · 2 EIP-1559 · 3 Blob · 4 EIP-7702"
+          },
+          "maxFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "EIP-1559 이후 tx만"
+          },
+          "maxPriorityFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "EIP-1559 이후 tx만"
+          },
+          "input": {
+            "type": "string",
+            "description": "호출 데이터. \"0x\"면 단순 송금"
+          },
+          "authorizationList": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Authorization"
+            },
+            "nullable": true,
+            "description": "EIP-7702(type 4) tx만"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failed"
+            ],
+            "description": "실패해도 수수료는 나갑니다"
+          },
+          "blockNumber": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "contractCreated": {
+            "type": "string",
+            "nullable": true,
+            "description": "컨트랙트 생성 tx일 때 만들어진 주소"
+          },
+          "feeWei": {
+            "type": "string",
+            "format": "decimal",
+            "description": "gasUsed × gasPriceWei"
+          },
+          "gasUsed": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "gasPriceWei": {
+            "type": "string",
+            "format": "decimal",
+            "description": "실제로 낸 가스 단가"
+          },
+          "baseFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "블록의 기본 수수료 단가"
+          },
+          "burntFeeWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "소각된 수수료 (baseFee × gasUsed)"
+          },
+          "savingsFeeWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "상한(maxFee)보다 덜 낸 금액"
+          },
+          "position": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "블록 안 순서"
+          },
+          "blobGasUsed": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "Blob tx만"
+          },
+          "blobGasPriceWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "Blob tx만"
+          },
+          "logCount": {
+            "type": "integer",
+            "description": "이벤트 로그 수"
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Log"
+            },
+            "description": "이벤트 로그 원본"
+          },
+          "tokenTransfers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenTransfer"
+            },
+            "description": "이 tx에서 일어난 ERC-20 토큰 이동. 없으면 빈 배열"
+          },
+          "tokens": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TokenMeta"
+            },
+            "description": "이 tx에 나온 토큰 컨트랙트의 이름표. 키는 토큰 주소"
+          },
+          "contracts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "from·to·토큰 전송 당사자 가운데 컨트랙트인 주소"
+          }
+        }
+      },
+      "PendingTx": {
+        "type": "object",
+        "description": "아직 블록에 들어가지 않은 tx",
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "nullable": true
+          },
+          "valueWei": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "nonce": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "gasLimit": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "type": {
+            "type": "integer"
+          },
+          "maxFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "maxPriorityFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "input": {
+            "type": "string"
+          },
+          "authorizationList": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Authorization"
+            },
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          "gasPriceWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          }
+        }
+      },
+      "Authorization": {
+        "type": "object",
+        "description": "EIP-7702 위임 서명 한 건",
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "address": {
+            "type": "string",
+            "description": "코드를 맡길 컨트랙트"
+          },
+          "nonce": {
+            "type": "string",
+            "format": "decimal"
+          }
+        }
+      },
+      "Log": {
+        "type": "object",
+        "description": "이벤트 로그 한 건",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "로그를 남긴 컨트랙트"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "topics[0]은 이벤트 서명의 해시"
+          },
+          "data": {
+            "type": "string"
+          },
+          "logIndex": {
+            "type": "string",
+            "format": "decimal",
+            "description": "블록 안 로그 순서"
+          }
+        }
+      },
+      "TokenTransfer": {
+        "type": "object",
+        "description": "ERC-20 Transfer 이벤트 한 건",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "토큰 컨트랙트 주소"
+          },
+          "from": {
+            "type": "string",
+            "description": "토큰을 보낸 주소"
+          },
+          "to": {
+            "type": "string",
+            "description": "토큰을 받은 주소"
+          },
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "description": "소수점 적용 전 정수. 표시할 때 10^decimals로 나눕니다"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "decimals": {
+            "type": "integer",
+            "nullable": true
+          }
+        }
+      },
+      "TokenMeta": {
+        "type": "object",
+        "description": "토큰 이름표. 조회에 실패한 칸은 null",
+        "properties": {
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "decimals": {
+            "type": "integer",
+            "nullable": true
+          }
+        }
+      },
+      "Trace": {
+        "type": "object",
+        "description": "내부 호출 목록",
+        "properties": {
+          "error": {
+            "type": "string",
+            "nullable": true,
+            "description": "최상위 실행이 실패했으면 그 이유"
+          },
+          "revertReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InternalCall"
+            },
+            "description": "최상위 호출을 뺀 내부 호출. 실행 순서대로"
+          }
+        }
+      },
+      "InternalCall": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "CALL, DELEGATECALL, STATICCALL, CREATE 등"
+          },
+          "from": {
+            "type": "string",
+            "nullable": true
+          },
+          "to": {
+            "type": "string",
+            "nullable": true
+          },
+          "valueWei": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "gasLimit": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "gasUsed": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "depth": {
+            "type": "integer",
+            "description": "호출 깊이. 1이 최상위 바로 아래"
+          },
+          "path": {
+            "type": "string",
+            "description": "호출 위치. 예: \"0_1\"은 첫 호출의 두 번째 하위 호출"
+          }
+        }
+      },
+      "StateDiff": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StateChange"
+            },
+            "description": "이 tx로 바뀐 주소만"
+          }
+        }
+      },
+      "StateChange": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "balanceBefore": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "balanceAfter": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "nonceBefore": {
+            "type": "integer"
+          },
+          "nonceAfter": {
+            "type": "integer"
+          },
+          "storage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StorageChange"
+            },
+            "description": "값이 바뀐 저장소 칸만"
+          }
+        }
+      },
+      "StorageChange": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          }
+        }
+      },
+      "BlockSummary": {
+        "type": "object",
+        "description": "목록의 블록 한 줄 (DB)",
+        "properties": {
+          "number": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "txCount": {
+            "type": "integer"
+          },
+          "miner": {
+            "type": "string",
+            "nullable": true,
+            "description": "Mustsem(PoA)은 0x000…0"
+          },
+          "gasUsed": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "gasLimit": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "baseFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          }
+        }
+      },
+      "BlockList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockSummary"
+            }
+          }
+        }
+      },
+      "Block": {
+        "type": "object",
+        "description": "블록 상세 (노드)",
+        "properties": {
+          "number": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "parentHash": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "miner": {
+            "type": "string",
+            "description": "Mustsem(PoA)은 0x000…0"
+          },
+          "gasUsed": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "gasLimit": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "baseFeePerGasWei": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "txCount": {
+            "type": "integer"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "포함된 tx 해시 (블록 안 순서대로)"
+          }
+        }
+      },
+      "BlockTxPage": {
+        "type": "object",
+        "properties": {
+          "blockNumber": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TxSummary"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "다음 페이지 cursor. 끝이면 null"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          }
+        }
+      },
+      "Address": {
+        "type": "object",
+        "description": "주소 정보 (노드)",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "요청한 그대로"
+          },
+          "balanceWei": {
+            "type": "string",
+            "format": "decimal",
+            "description": "MST 잔액(최소 단위, 10^18 = 1 MST)"
+          },
+          "nonce": {
+            "type": "string",
+            "format": "decimal",
+            "description": "EOA는 보낸 tx 수, 컨트랙트는 자신이 만든 컨트랙트 수"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "eoa",
+              "contract"
+            ],
+            "description": "코드가 있으면 contract"
+          },
+          "delegatedTo": {
+            "type": "string",
+            "nullable": true,
+            "description": "EIP-7702로 코드를 맡긴 컨트랙트. 없으면 null"
+          }
+        }
+      },
+      "AddressTxPage": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TxSummary"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "다음 페이지 cursor. 끝이면 null"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          }
+        }
+      },
+      "TokenBalance": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "decimals": {
+            "type": "integer",
+            "nullable": true
+          },
+          "balance": {
+            "type": "string",
+            "format": "decimal",
+            "description": "소수점 적용 전 정수"
+          }
+        }
+      },
+      "AddressTokens": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenBalance"
+            }
+          }
+        }
+      },
+      "TokenTransferRow": {
+        "type": "object",
+        "description": "토큰 전송 한 줄 (DB)",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "tokenName": {
+            "type": "string",
+            "nullable": true
+          },
+          "tokenSymbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "tokenDecimals": {
+            "type": "integer",
+            "nullable": true
+          },
+          "txHash": {
+            "type": "string"
+          },
+          "blockNumber": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "logIndex": {
+            "type": "integer",
+            "description": "블록 안 로그 순서"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "from": {
+            "type": "string",
+            "description": "0x000…0이면 발행(mint)"
+          },
+          "to": {
+            "type": "string",
+            "description": "0x000…0이면 소각(burn)"
+          },
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "description": "소수점 적용 전 정수"
+          },
+          "method": {
+            "type": "string",
+            "nullable": true,
+            "description": "이 전송을 일으킨 tx의 함수 선택자"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out",
+              "self"
+            ],
+            "description": "주소 기준 조회(holder)일 때만"
+          }
+        }
+      },
+      "AddressTokenTransferPage": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenTransferRow"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "다음 페이지 cursor. 끝이면 null"
+          }
+        }
+      },
+      "TokenTransferPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenTransferRow"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "다음 페이지 cursor. 끝이면 null"
+          },
+          "holder": {
+            "type": "string",
+            "description": "holder를 줬을 때만"
+          },
+          "holderBalance": {
+            "type": "string",
+            "format": "decimal",
+            "description": "holder를 줬을 때만. 그 주소의 잔액"
+          },
+          "total": {
+            "type": "string",
+            "format": "decimal",
+            "description": "이 토큰의 전체 전송 수"
+          },
+          "syncedBlock": {
+            "type": "string",
+            "format": "decimal",
+            "description": "이 블록까지 수집됨"
+          }
+        }
+      },
+      "TrackedToken": {
+        "type": "object",
+        "description": "추적 중인 토큰 한 줄",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "decimals": {
+            "type": "integer",
+            "nullable": true
+          },
+          "startBlock": {
+            "type": "string",
+            "format": "decimal",
+            "description": "수집을 시작한 블록 (보통 토큰 배포 블록)"
+          },
+          "syncedBlock": {
+            "type": "string",
+            "format": "decimal",
+            "description": "이 블록까지 수집됨"
+          },
+          "holders": {
+            "type": "integer"
+          },
+          "transfers": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TokenList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackedToken"
+            }
+          },
+          "head": {
+            "type": "string",
+            "format": "decimal",
+            "description": "노드의 최신 블록"
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "description": "토큰 개요",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "decimals": {
+            "type": "integer",
+            "nullable": true
+          },
+          "totalSupply": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true,
+            "description": "총발행량 (소수점 적용 전 정수, 노드에서 지금 값)"
+          },
+          "tracked": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "홀더를 추적 중인가. DB에 못 닿으면 null"
+          },
+          "holders": {
+            "type": "integer",
+            "nullable": true
+          },
+          "transfers": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "startBlock": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "syncedBlock": {
+            "type": "string",
+            "format": "decimal",
+            "nullable": true
+          },
+          "head": {
+            "type": "string",
+            "format": "decimal",
+            "description": "노드의 최신 블록"
+          }
+        }
+      },
+      "Holder": {
+        "type": "object",
+        "properties": {
+          "rank": {
+            "type": "integer"
+          },
+          "address": {
+            "type": "string"
+          },
+          "balance": {
+            "type": "string",
+            "format": "decimal",
+            "description": "소수점 적용 전 정수"
+          },
+          "isContract": {
+            "type": "boolean",
+            "description": "컨트랙트 주소인가 (거래소·풀 구분용)"
+          }
+        }
+      },
+      "HolderPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Holder"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer",
+            "description": "전체 홀더 수"
+          },
+          "totalPages": {
+            "type": "integer"
+          },
+          "syncedBlock": {
+            "type": "string",
+            "format": "decimal"
+          }
+        }
+      },
+      "HolderSummary": {
+        "type": "object",
+        "description": "홀더 분포. 금액은 모두 소수점 적용 전 정수",
+        "properties": {
+          "holders": {
+            "type": "integer"
+          },
+          "totalHeld": {
+            "type": "string",
+            "format": "decimal",
+            "description": "홀더들이 가진 양의 합"
+          },
+          "top5": {
+            "type": "string",
+            "format": "decimal",
+            "description": "상위 5명이 가진 양"
+          },
+          "top10": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "top25": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "top50": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "top100": {
+            "type": "string",
+            "format": "decimal"
+          },
+          "weighted": {
+            "type": "string",
+            "format": "decimal",
+            "description": "Σ(순위 × 보유량). 지니 계수 계산용"
+          },
+          "over1pct": {
+            "type": "integer",
+            "description": "전체 보유량의 1% 이상을 가진 주소 수"
+          },
+          "magnitudes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Magnitude"
+            },
+            "description": "보유량 자릿수별 홀더 수"
+          }
+        }
+      },
+      "Magnitude": {
+        "type": "object",
+        "properties": {
+          "magnitude": {
+            "type": "integer",
+            "description": "floor(log10(보유량 정수)). 11이면 10^11 이상 10^12 미만"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

@@ -13,9 +13,60 @@
  */
 import { getTx, getBlock, getAddress, getTrace, getStateDiff, getTokenInfo, contractsAmong, isUnsupported } from './explorer.js';
 import { isTxHash, isBlockId, isAddress, parseLimit, parseCursor, parseIndexCursor, parsePage } from './validate.js';
+import { readFileSync } from 'node:fs';
+
+/**
+ * API 명세 (OpenAPI 3.0). 라우트를 더하거나 응답 모양을 바꾸면 이 파일도 같이 고친다 —
+ * test/app.test.js 가 "명세의 경로 = 실제 라우트"인지 확인한다.
+ * 시작할 때 한 번 읽어 둔다 (요청마다 디스크를 읽지 않게).
+ */
+const OPENAPI = readFileSync(new URL('./openapi.json', import.meta.url), 'utf8');
+
+/**
+ * Swagger UI. 화면 파일은 CDN(jsDelivr)에서 버전을 고정해 받는다 — 서버 이미지에 수 MB 를 싣지 않으려고.
+ * 같은 도메인의 /api/v1/openapi.json 을 읽으므로 "Try it out" 이 이 서버로 바로 요청을 보낸다.
+ */
+const SWAGGER_UI = '5.17.14';
+const DOCS_HTML = `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mustsem Explorer API</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@${SWAGGER_UI}/swagger-ui.css">
+<style>body { margin: 0; } .swagger-ui .topbar { display: none; }</style>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@${SWAGGER_UI}/swagger-ui-bundle.js"></script>
+<script>
+  window.ui = SwaggerUIBundle({
+    url: '/api/v1/openapi.json',
+    dom_id: '#swagger-ui',
+    deepLinking: true,          // 펼친 API 가 주소(#/토큰/listTokenHolders)에 남아 링크로 공유된다
+    tryItOutEnabled: true,      // 처음부터 "Try it out" 상태 — 값만 넣고 Execute
+    displayRequestDuration: true,
+    defaultModelsExpandDepth: 0,
+  });
+</script>
+</body>
+</html>
+`;
 
 /** 경로 → 처리 함수 표. 새 API 는 여기에 한 줄 추가하는 것으로 끝난다. */
-const routes = [
+export const routes = [
+  {
+    // API 문서 (Swagger UI). /api/docs 와 /api/docs/ 둘 다
+    method: 'GET',
+    path: /^\/api\/docs\/?$/,
+    handle: () => [200, new Raw(DOCS_HTML, { 'content-type': 'text/html; charset=utf-8' })],
+  },
+  {
+    // 기계가 읽는 명세. Postman·코드 생성기에 이 주소를 그대로 넣으면 된다
+    method: 'GET',
+    path: /^\/api\/v1\/openapi\.json$/,
+    handle: () => [200, new Raw(OPENAPI, { 'content-type': 'application/json; charset=utf-8' })],
+  },
   {
     method: 'GET',
     path: /^\/api\/v1\/health$/,

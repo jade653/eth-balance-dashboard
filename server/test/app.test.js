@@ -5,7 +5,8 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { createApp } from '../src/app.js';
+import { readFileSync } from 'node:fs';
+import { createApp, routes } from '../src/app.js';
 
 const TX = '0x' + 'aa'.repeat(32);
 const ADDR = '0x' + '11'.repeat(20);
@@ -545,4 +546,43 @@ test('우리 코드의 버그는 503 이 아니라 500', async () => {
     eth_getBlockByNumber: () => ({ timestamp: '0x0' }),
   };
   assert.equal((await get(`/api/v1/txs/${TX}`)).status, 500);
+});
+
+/* ── API 문서 (Swagger UI) ─────────────────────────────────────────────── */
+
+const SPEC = JSON.parse(readFileSync(new URL('../src/openapi.json', import.meta.url), 'utf8'));
+const DOC_ROUTES = new Set(['/api/docs', '/api/v1/openapi.json']);
+// 명세 경로의 {변수} 를 형식에 맞는 값으로 채운다: /txs/{hash} → /api/v1/txs/0xaa…
+const SAMPLE = { hash: TX, address: ADDR, id: 'latest', number: '16' };
+const concrete = (p) => '/api/v1' + p.replace(/\{(\w+)\}/g, (_, k) => SAMPLE[k] ?? 'x');
+
+test('GET /api/docs → Swagger UI 화면, /api/v1/openapi.json → 명세', async () => {
+  for (const path of ['/api/docs', '/api/docs/']) {
+    const res = await get(path);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /^text\/html/);
+    assert.match(await res.text(), /SwaggerUIBundle\(\{\s*url: '\/api\/v1\/openapi\.json'/);
+  }
+  const res = await get('/api/v1/openapi.json');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /^application\/json/);
+  assert.equal((await res.json()).openapi, '3.0.3');
+});
+
+test('명세(openapi.json)의 경로와 실제 라우트가 서로 빠짐없이 같다', () => {
+  const ops = Object.entries(SPEC.paths).flatMap(([p, item]) => Object.keys(item).map((m) => ({ method: m.toUpperCase(), p, url: concrete(p) })));
+  // 명세에 적힌 API 는 전부 실제로 있다
+  for (const op of ops) {
+    assert.ok(routes.some((r) => r.method === op.method && r.path.test(op.url)), `명세에는 있는데 라우트가 없다: ${op.method} ${op.p}`);
+  }
+  // 실제 API 는 전부 명세에 적혀 있다 (문서 자신은 빼고)
+  for (const r of routes) {
+    if ([...DOC_ROUTES].some((d) => r.path.test(d))) continue;
+    assert.ok(ops.some((op) => op.method === r.method && r.path.test(op.url)), `라우트는 있는데 명세에 없다: ${r.method} ${r.path}`);
+  }
+});
+
+test('명세의 $ref 는 모두 정의된 스키마를 가리킨다', () => {
+  const refs = [...JSON.stringify(SPEC).matchAll(/"#\/components\/schemas\/(\w+)"/g)].map((m) => m[1]);
+  for (const name of new Set(refs)) assert.ok(SPEC.components.schemas[name], `없는 스키마: ${name}`);
 });

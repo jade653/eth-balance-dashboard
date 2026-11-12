@@ -112,6 +112,10 @@ cd server && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:5432/postgres 
 
 모든 숫자(블록 번호, wei, 가스)는 **10진수 문자열**로 준다. 에러 본문은 항상 `{"error":"<코드>"}`.
 
+**문서**: `/api/docs` 에 Swagger UI 가 있다 (배포: https://test.mustree.kr/api/docs). 화면에서 바로 호출해 볼 수 있다.
+명세 원본은 `/api/v1/openapi.json` (= [server/src/openapi.json](server/src/openapi.json)).
+라우트를 더하거나 응답 모양을 바꾸면 이 파일도 같이 고친다 — 경로가 어긋나면 `server/test/app.test.js` 가 실패한다.
+
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/api/v1/health` | 서버·RPC 상태 + 인덱서 범위·지연 |
